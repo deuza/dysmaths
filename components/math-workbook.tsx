@@ -1,280 +1,251 @@
 "use client";
 
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toBlob, toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 import { Document, ImageRun, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 
 type StudyMode = "college" | "lycee";
+type ToolbarPanel = "text" | "math";
 
-type WriterLine = {
-  id: string;
-  latex: string;
-};
-
-type Shortcut = {
+type ShortcutItem = {
   id: string;
   label: string;
   hint: string;
-  latex: string;
-  hotkey: string;
+  content: string;
   modes: StudyMode[];
 };
 
 type ShortcutGroup = {
   name: string;
-  tone: string;
-  items: Shortcut[];
+  items: ShortcutItem[];
 };
 
 type WriterState = {
   title: string;
   mode: StudyMode;
-  lines: WriterLine[];
+  content: string;
 };
 
-type MathfieldElement = HTMLElement & {
-  value: string;
-  insert?: (value: string) => void;
-  focus: () => void;
-  blur?: () => void;
-};
-
-type MathfieldGlobal = {
-  fontsDirectory?: string | null;
-  soundsDirectory?: string | null;
-};
-
-type MathfieldWindow = typeof globalThis & {
-  MathfieldElement?: MathfieldGlobal;
-};
-
-const STORAGE_KEY = "maths-facile-writer-v2";
+const STORAGE_KEY = "maths-facile-rich-writer-v1";
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     name: "Essentiels",
-    tone: "tone-sand",
     items: [
       {
         id: "fraction",
         label: "Fraction",
-        hint: "Ecriture de fraction",
-        latex: "\\frac{a}{b}",
-        hotkey: "1",
+        hint: "Insère a/b",
+        content: "a/b",
         modes: ["college", "lycee"]
       },
       {
         id: "power",
         label: "Puissance",
-        hint: "Carré, cube, puissance n",
-        latex: "a^n",
-        hotkey: "2",
+        hint: "Insère a^n",
+        content: "a^n",
         modes: ["college", "lycee"]
       },
       {
         id: "root",
         label: "Racine",
-        hint: "Racine carrée",
-        latex: "\\sqrt{a}",
-        hotkey: "3",
+        hint: "Insère √(a)",
+        content: "√(a)",
         modes: ["college", "lycee"]
       },
       {
         id: "division",
         label: "Division",
-        hint: "Signe diviser",
-        latex: "a\\div b",
-        hotkey: "4",
+        hint: "Insère ÷",
+        content: " ÷ ",
         modes: ["college", "lycee"]
       },
       {
         id: "times",
         label: "Produit",
-        hint: "Signe multiplier",
-        latex: "a\\times b",
-        hotkey: "5",
+        hint: "Insère ×",
+        content: " × ",
         modes: ["college", "lycee"]
       },
       {
         id: "percent",
         label: "Pourcentage",
-        hint: "Pourcent",
-        latex: "25\\%",
-        hotkey: "6",
+        hint: "Insère %",
+        content: "%",
+        modes: ["college", "lycee"]
+      },
+      {
+        id: "pi",
+        label: "Pi",
+        hint: "Insère π",
+        content: "π",
+        modes: ["college", "lycee"]
+      },
+      {
+        id: "degree",
+        label: "Degré",
+        hint: "Insère °",
+        content: "°",
         modes: ["college", "lycee"]
       }
     ]
   },
   {
     name: "Comparer",
-    tone: "tone-blue",
     items: [
       {
         id: "equal",
-        label: "Egal",
-        hint: "Egalité",
-        latex: "=",
-        hotkey: "7",
-        modes: ["college", "lycee"]
-      },
-      {
-        id: "leq",
-        label: "Inférieur ou égal",
-        hint: "Signe ≤",
-        latex: "\\le",
-        hotkey: "8",
-        modes: ["college", "lycee"]
-      },
-      {
-        id: "geq",
-        label: "Supérieur ou égal",
-        hint: "Signe ≥",
-        latex: "\\ge",
-        hotkey: "9",
-        modes: ["college", "lycee"]
-      },
-      {
-        id: "approx",
-        label: "Approché",
-        hint: "Signe ≈",
-        latex: "\\approx",
-        hotkey: "0",
+        label: "Égal",
+        hint: "Insère =",
+        content: " = ",
         modes: ["college", "lycee"]
       },
       {
         id: "neq",
         label: "Différent",
-        hint: "Signe ≠",
-        latex: "\\neq",
-        hotkey: "-",
+        hint: "Insère ≠",
+        content: " ≠ ",
+        modes: ["college", "lycee"]
+      },
+      {
+        id: "leq",
+        label: "Inférieur ou égal",
+        hint: "Insère ≤",
+        content: " ≤ ",
+        modes: ["college", "lycee"]
+      },
+      {
+        id: "geq",
+        label: "Supérieur ou égal",
+        hint: "Insère ≥",
+        content: " ≥ ",
+        modes: ["college", "lycee"]
+      },
+      {
+        id: "approx",
+        label: "Approché",
+        hint: "Insère ≈",
+        content: " ≈ ",
         modes: ["college", "lycee"]
       }
     ]
   },
   {
     name: "Collège",
-    tone: "tone-green",
     items: [
       {
         id: "angle",
         label: "Angle",
-        hint: "Mesure d'angle",
-        latex: "\\widehat{ABC}=40^\\circ",
-        hotkey: "a",
+        hint: "∠ABC = 40°",
+        content: "∠ABC = 40°",
         modes: ["college", "lycee"]
       },
       {
         id: "segment",
         label: "Segment",
-        hint: "Longueur de segment",
-        latex: "\\overline{AB}=5\\text{ cm}",
-        hotkey: "s",
+        hint: "[AB] = 5 cm",
+        content: "[AB] = 5 cm",
         modes: ["college", "lycee"]
       },
       {
         id: "parallel",
         label: "Parallèle",
-        hint: "Droites parallèles",
-        latex: "(AB)\\parallel(CD)",
-        hotkey: "d",
+        hint: "(AB) ∥ (CD)",
+        content: "(AB) ∥ (CD)",
         modes: ["college", "lycee"]
       },
       {
-        id: "perp",
+        id: "perpendicular",
         label: "Perpendiculaire",
-        hint: "Droites perpendiculaires",
-        latex: "(AB)\\perp(CD)",
-        hotkey: "f",
-        modes: ["college", "lycee"]
-      },
-      {
-        id: "pi",
-        label: "Pi",
-        hint: "Constante pi",
-        latex: "\\pi",
-        hotkey: "g",
+        hint: "(AB) ⟂ (CD)",
+        content: "(AB) ⟂ (CD)",
         modes: ["college", "lycee"]
       },
       {
         id: "probability",
         label: "Probabilité",
-        hint: "Calcul simple",
-        latex: "P(A)=\\frac{3}{10}",
-        hotkey: "h",
+        hint: "P(A) = 3/10",
+        content: "P(A) = 3/10",
         modes: ["college", "lycee"]
       }
     ]
   },
   {
     name: "Lycée",
-    tone: "tone-plum",
     items: [
       {
         id: "function",
         label: "Fonction",
-        hint: "Notation de fonction",
-        latex: "f(x)=",
-        hotkey: "j",
+        hint: "f(x) =",
+        content: "f(x) = ",
         modes: ["lycee"]
       },
       {
         id: "limit",
         label: "Limite",
-        hint: "Notation de limite",
-        latex: "\\lim_{x\\to a}",
-        hotkey: "k",
+        hint: "lim(x→a)",
+        content: "lim(x→a)",
         modes: ["lycee"]
       },
       {
         id: "sum",
         label: "Somme",
-        hint: "Somme sigma",
-        latex: "\\sum_{k=1}^{n}",
-        hotkey: "l",
+        hint: "Σ(k=1→n)",
+        content: "Σ(k=1→n)",
         modes: ["lycee"]
       },
       {
         id: "integral",
         label: "Intégrale",
-        hint: "Intégrale définie",
-        latex: "\\int_a^b",
-        hotkey: "m",
+        hint: "∫[a;b]",
+        content: "∫[a;b]",
         modes: ["lycee"]
       },
       {
-        id: "trig",
+        id: "trigonometry",
         label: "Trigonométrie",
-        hint: "Sinus, cosinus",
-        latex: "\\sin(x)",
-        hotkey: ",",
+        hint: "sin(x)",
+        content: "sin(x)",
         modes: ["lycee"]
       },
       {
         id: "ln",
         label: "Ln",
-        hint: "Logarithme népérien",
-        latex: "\\ln(x)",
-        hotkey: ".",
+        hint: "ln(x)",
+        content: "ln(x)",
         modes: ["lycee"]
       }
     ]
   }
 ];
 
-const DEFAULT_STATE: WriterState = {
-  title: "Mes formules de maths",
-  mode: "college",
-  lines: [
-    { id: "line-1", latex: "Ecrire ici une formule ou une phrase de maths" },
-    { id: "line-2", latex: "\\frac{3}{4}+\\frac{1}{8}" }
-  ]
-};
+const FONT_SIZE_OPTIONS = [
+  { id: "size-small", label: "Petit", value: "2" },
+  { id: "size-normal", label: "Normal", value: "3" },
+  { id: "size-large", label: "Grand", value: "5" },
+  { id: "size-xlarge", label: "Très grand", value: "7" }
+] as const;
 
-function createId(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
-}
+const COLOR_OPTIONS = [
+  { id: "ink", label: "Encre", value: "#1f2d3d" },
+  { id: "orange", label: "Orange", value: "#d56f3c" },
+  { id: "blue", label: "Bleu", value: "#2169b3" },
+  { id: "green", label: "Vert", value: "#2f8f57" },
+  { id: "pink", label: "Rose", value: "#b54d7a" }
+] as const;
+
+const DEFAULT_CONTENT = [
+  "<p><strong>Commence ici :</strong> écris une réponse, une idée ou une formule.</p>",
+  "<p>Exemple : aire du disque = π × r^2</p>"
+].join("");
+
+const DEFAULT_STATE: WriterState = {
+  title: "Mon document de maths",
+  mode: "college",
+  content: DEFAULT_CONTENT
+};
 
 function safeFileName(value: string) {
   return value
@@ -286,132 +257,33 @@ function safeFileName(value: string) {
     .toLowerCase();
 }
 
-function WriterLineField({
-  value,
-  onChange,
-  onFocus,
-  onEnter,
-  onDeleteEmpty,
-  register,
-  readOnly = false
-}: {
-  value: string;
-  onChange?: (value: string) => void;
-  onFocus?: () => void;
-  onEnter?: () => void;
-  onDeleteEmpty?: () => void;
-  register?: (element: MathfieldElement | null) => void;
-  readOnly?: boolean;
-}) {
-  const ref = useRef<MathfieldElement | null>(null);
+function isEditorActuallyEmpty(element: HTMLDivElement | null) {
+  if (!element) {
+    return true;
+  }
 
-  useEffect(() => {
-    import("mathlive")
-      .then((module) => {
-        const globalMathfield = (globalThis as MathfieldWindow).MathfieldElement;
-        const mathfieldGlobal = (
-          module.MathfieldElement ?? globalMathfield
-        ) as MathfieldGlobal | undefined;
-
-        if (!mathfieldGlobal) {
-          return;
-        }
-
-        mathfieldGlobal.fontsDirectory = "/mathlive/fonts";
-        mathfieldGlobal.soundsDirectory = null;
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    const element = ref.current;
-
-    if (!element) {
-      return;
-    }
-
-    register?.(element);
-
-    const handleInput = () => {
-      onChange?.(element.value);
-    };
-
-    const handleKeyDown = (event: Event) => {
-      const keyboardEvent = event as KeyboardEvent;
-
-      if (readOnly) {
-        return;
-      }
-
-      if (keyboardEvent.key === "Enter" && !keyboardEvent.shiftKey) {
-        keyboardEvent.preventDefault();
-        onEnter?.();
-        return;
-      }
-
-      if (
-        keyboardEvent.key === "Backspace" &&
-        element.value.trim() === "" &&
-        onDeleteEmpty
-      ) {
-        keyboardEvent.preventDefault();
-        onDeleteEmpty();
-      }
-    };
-
-    element.setAttribute("virtual-keyboard-mode", "onfocus");
-    element.setAttribute("smart-mode", "");
-    element.setAttribute("smart-fence", "");
-    element.setAttribute("default-mode", "math");
-    element.setAttribute("letter-shape-style", "french");
-
-    if (readOnly) {
-      element.setAttribute("read-only", "");
-      element.setAttribute("aria-readonly", "true");
-      element.setAttribute("tabindex", "-1");
-    } else {
-      element.removeAttribute("read-only");
-      element.setAttribute("aria-readonly", "false");
-      element.setAttribute("tabindex", "0");
-    }
-
-    if (element.value !== value) {
-      element.value = value;
-    }
-
-    element.addEventListener("input", handleInput);
-    element.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      register?.(null);
-      element.removeEventListener("input", handleInput);
-      element.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onChange, onDeleteEmpty, onEnter, readOnly, register, value]);
-
-  useEffect(() => {
-    if (ref.current && ref.current.value !== value) {
-      ref.current.value = value;
-    }
-  }, [value]);
-
-  return createElement("math-field", {
-    ref: (node: Element | null) => {
-      ref.current = node as MathfieldElement | null;
-    },
-    className: readOnly ? "writer-preview-field" : "writer-line-field",
-    onFocus
-  });
+  const text = element.textContent?.replace(/\u200B/g, "").trim() ?? "";
+  return text.length === 0;
 }
 
 export function MathWorkbook() {
   const [state, setState] = useState<WriterState>(DEFAULT_STATE);
-  const [activeLineId, setActiveLineId] = useState(DEFAULT_STATE.lines[0].id);
-  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+  const [toolbarPanel, setToolbarPanel] = useState<ToolbarPanel>("math");
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "word" | null>(null);
-  const fieldRefs = useRef<Record<string, MathfieldElement | null>>({});
+  const [isEditorEmpty, setIsEditorEmpty] = useState(false);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const exportRef = useRef<HTMLDivElement | null>(null);
+  const selectionRef = useRef<Range | null>(null);
+
+  const activeShortcutGroups = useMemo(
+    () =>
+      SHORTCUT_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.modes.includes(state.mode))
+      })).filter((group) => group.items.length > 0),
+    [state.mode]
+  );
 
   useEffect(() => {
     setIsHydrated(true);
@@ -425,9 +297,12 @@ export function MathWorkbook() {
 
       const parsed = JSON.parse(saved) as WriterState;
 
-      if (Array.isArray(parsed.lines) && parsed.lines.length > 0) {
+      if (
+        typeof parsed.title === "string" &&
+        (parsed.mode === "college" || parsed.mode === "lycee") &&
+        typeof parsed.content === "string"
+      ) {
         setState(parsed);
-        setActiveLineId(parsed.lines[0].id);
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -443,84 +318,158 @@ export function MathWorkbook() {
   }, [isHydrated, state]);
 
   useEffect(() => {
-    if (!pendingFocusId) {
+    const editor = editorRef.current;
+
+    if (!editor) {
       return;
     }
 
-    const focusTarget = () => {
-      const field = fieldRefs.current[pendingFocusId];
+    if (editor.innerHTML !== state.content) {
+      editor.innerHTML = state.content;
+    }
 
-      if (!field) {
-        return false;
-      }
+    setIsEditorEmpty(isEditorActuallyEmpty(editor));
+  }, [state.content]);
 
-      field.focus();
-      setActiveLineId(pendingFocusId);
-      setPendingFocusId(null);
-      return true;
-    };
+  function saveSelection() {
+    const selection = window.getSelection();
 
-    if (focusTarget()) {
+    if (!selection || selection.rangeCount === 0 || !editorRef.current) {
       return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      focusTarget();
-    });
+    const range = selection.getRangeAt(0);
 
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [pendingFocusId, state.lines.length]);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) {
+      return;
+    }
 
-  const activeShortcuts = useMemo(
-    () =>
-      SHORTCUT_GROUPS.map((group) => ({
-        ...group,
-        items: group.items.filter((item) => item.modes.includes(state.mode))
-      })).filter((group) => group.items.length > 0),
-    [state.mode]
-  );
+    selectionRef.current = range.cloneRange();
+  }
 
-  const hotkeyHelp = useMemo(
-    () =>
-      activeShortcuts
-        .flatMap((group) => group.items)
-        .slice(0, 8)
-        .map((item) => `${item.hotkey.toUpperCase()} · ${item.label}`),
-    [activeShortcuts]
-  );
+  function focusEditor(moveToEnd = false) {
+    const editor = editorRef.current;
 
-  useEffect(() => {
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) {
-        return;
-      }
+    if (!editor) {
+      return;
+    }
 
-      const activeField = fieldRefs.current[activeLineId];
+    editor.focus();
 
-      if (!activeField || document.activeElement !== activeField) {
-        return;
-      }
+    if (!moveToEnd) {
+      return;
+    }
 
-      const shortcut = activeShortcuts
-        .flatMap((group) => group.items)
-        .find((item) => item.hotkey === event.key.toLowerCase());
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
 
-      if (!shortcut) {
-        return;
-      }
+    const selection = window.getSelection();
 
+    if (!selection) {
+      return;
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+    selectionRef.current = range.cloneRange();
+  }
+
+  function restoreSelection() {
+    const selection = window.getSelection();
+
+    if (!selection || !selectionRef.current) {
+      return;
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(selectionRef.current);
+  }
+
+  function syncEditorContent() {
+    const editor = editorRef.current;
+
+    if (!editor) {
+      return;
+    }
+
+    if (isEditorActuallyEmpty(editor)) {
+      editor.innerHTML = "";
+      setIsEditorEmpty(true);
+      setState((current) => ({
+        ...current,
+        content: ""
+      }));
+      return;
+    }
+
+    const html = editor.innerHTML;
+    setIsEditorEmpty(false);
+    setState((current) => ({
+      ...current,
+      content: html
+    }));
+  }
+
+  function runCommand(command: string, value?: string) {
+    focusEditor();
+    restoreSelection();
+    document.execCommand("styleWithCSS", false, "true");
+    document.execCommand(command, false, value);
+    syncEditorContent();
+    saveSelection();
+  }
+
+  function insertAtCursor(content: string) {
+    focusEditor();
+    restoreSelection();
+
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0) {
+      focusEditor(true);
+      insertAtCursor(content);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+
+    const textNode = document.createTextNode(content);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+    selectionRef.current = range.cloneRange();
+
+    syncEditorContent();
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const pastedText = event.clipboardData.getData("text/plain");
+    insertAtCursor(pastedText);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Tab") {
       event.preventDefault();
-      insertShortcut(shortcut);
-    };
+      insertAtCursor("    ");
+      return;
+    }
 
-    window.addEventListener("keydown", handleKeydown);
+    window.requestAnimationFrame(() => {
+      saveSelection();
+      syncEditorContent();
+    });
+  }
 
-    return () => {
-      window.removeEventListener("keydown", handleKeydown);
-    };
-  }, [activeLineId, activeShortcuts]);
+  function handleInput() {
+    syncEditorContent();
+    saveSelection();
+  }
 
   function updateTitle(title: string) {
     setState((current) => ({
@@ -536,95 +485,20 @@ export function MathWorkbook() {
     }));
   }
 
-  function updateLine(lineId: string, latex: string) {
-    setState((current) => ({
-      ...current,
-      lines: current.lines.map((line) =>
-        line.id === lineId ? { ...line, latex } : line
-      )
-    }));
-  }
-
-  function addLine(afterId?: string) {
-    const newLine = {
-      id: createId("line"),
-      latex: ""
-    };
-
-    setState((current) => {
-      if (!afterId) {
-        return {
-          ...current,
-          lines: [...current.lines, newLine]
-        };
-      }
-
-      const index = current.lines.findIndex((line) => line.id === afterId);
-
-      if (index === -1) {
-        return {
-          ...current,
-          lines: [...current.lines, newLine]
-        };
-      }
-
-      const lines = [...current.lines];
-      lines.splice(index + 1, 0, newLine);
-
-      return {
-        ...current,
-        lines
-      };
-    });
-
-    setPendingFocusId(newLine.id);
-  }
-
-  function removeLine(lineId: string) {
-    setState((current) => {
-      if (current.lines.length === 1) {
-        return current;
-      }
-
-      const index = current.lines.findIndex((line) => line.id === lineId);
-      const lines = current.lines.filter((line) => line.id !== lineId);
-      const fallback = lines[Math.max(0, index - 1)] ?? lines[0];
-
-      setPendingFocusId(fallback.id);
-
-      return {
-        ...current,
-        lines
-      };
-    });
-  }
-
   function resetDocument() {
     setState(DEFAULT_STATE);
-    setActiveLineId(DEFAULT_STATE.lines[0].id);
-    setPendingFocusId(DEFAULT_STATE.lines[0].id);
+    setToolbarPanel("math");
+    selectionRef.current = null;
+
+    if (editorRef.current) {
+      editorRef.current.innerHTML = DEFAULT_STATE.content;
+    }
+
     window.localStorage.removeItem(STORAGE_KEY);
-  }
-
-  function insertShortcut(shortcut: Shortcut) {
-    const activeField =
-      fieldRefs.current[activeLineId] ?? fieldRefs.current[state.lines[0]?.id ?? ""];
-
-    if (activeField?.insert) {
-      activeField.focus();
-      activeField.insert(shortcut.latex);
-      window.requestAnimationFrame(() => {
-        updateLine(activeLineId, activeField.value);
-      });
-      return;
-    }
-
-    const firstLineId = state.lines[0]?.id;
-
-    if (firstLineId) {
-      updateLine(firstLineId, `${state.lines[0].latex} ${shortcut.latex}`.trim());
-      setPendingFocusId(firstLineId);
-    }
+    window.requestAnimationFrame(() => {
+      focusEditor(true);
+      setIsEditorEmpty(false);
+    });
   }
 
   async function exportPdf() {
@@ -632,7 +506,6 @@ export function MathWorkbook() {
       return;
     }
 
-    fieldRefs.current[activeLineId]?.blur?.();
     setIsExporting("pdf");
 
     try {
@@ -681,7 +554,6 @@ export function MathWorkbook() {
       return;
     }
 
-    fieldRefs.current[activeLineId]?.blur?.();
     setIsExporting("word");
 
     try {
@@ -711,7 +583,7 @@ export function MathWorkbook() {
       const ratio = maxWidth / image.width;
       const height = Math.max(280, Math.round(image.height * ratio));
 
-      const document = new Document({
+      const documentFile = new Document({
         sections: [
           {
             children: [
@@ -752,7 +624,7 @@ export function MathWorkbook() {
         ]
       });
 
-      const docBlob = await Packer.toBlob(document);
+      const docBlob = await Packer.toBlob(documentFile);
       saveAs(docBlob, `${safeFileName(state.title) || "maths-facile"}.docx`);
     } finally {
       setIsExporting(null);
@@ -760,168 +632,219 @@ export function MathWorkbook() {
   }
 
   return (
-    <main className="writer-shell">
-      <header className="writer-topbar">
-        <div className="writer-brand">
-          <p className="writer-eyebrow">Maths facile</p>
-          <h1>Une feuille pour écrire, des raccourcis pour aller vite.</h1>
-          <p className="writer-intro">
-            L&apos;enfant écrit dans une grande page comme dans un traitement de texte,
-            puis insère les symboles utiles du programme en un clic ou avec
-            <strong> Ctrl</strong> / <strong>Cmd</strong> + une touche.
-          </p>
-        </div>
-
-        <div className="writer-controls">
-          <label className="title-field">
-            <span>Titre du document</span>
-            <input
-              value={state.title}
-              onChange={(event) => updateTitle(event.target.value)}
-              placeholder="Mes formules de maths"
-            />
-          </label>
-
-          <div className="mode-switch" aria-label="Choix du mode">
-            <button
-              type="button"
-              className={state.mode === "college" ? "mode-active" : ""}
-              onClick={() => updateMode("college")}
-              aria-pressed={state.mode === "college"}
-            >
-              Collège
-            </button>
-            <button
-              type="button"
-              className={state.mode === "lycee" ? "mode-active" : ""}
-              onClick={() => updateMode("lycee")}
-              aria-pressed={state.mode === "lycee"}
-            >
-              Lycée
-            </button>
+    <main className="editor-shell">
+      <header className="top-toolbar">
+        <div className="toolbar-main-row">
+          <div className="toolbar-brand">
+            <p className="toolbar-eyebrow">Maths facile</p>
+            <label className="document-title-field">
+              <span>Titre</span>
+              <input
+                value={state.title}
+                onChange={(event) => updateTitle(event.target.value)}
+                placeholder="Mon document de maths"
+              />
+            </label>
           </div>
 
-          <div className="export-actions">
-            <button type="button" className="toolbar-button primary" onClick={exportPdf} disabled={isExporting !== null}>
-              {isExporting === "pdf" ? "Création PDF..." : "PDF"}
-            </button>
-            <button type="button" className="toolbar-button secondary" onClick={exportWord} disabled={isExporting !== null}>
-              {isExporting === "word" ? "Création Word..." : "Word"}
-            </button>
-            <button type="button" className="toolbar-button ghost" onClick={() => window.print()}>
-              Imprimer
-            </button>
-            <button type="button" className="toolbar-button ghost" onClick={resetDocument}>
-              Nouveau
-            </button>
-          </div>
-        </div>
-      </header>
+          <div className="toolbar-side">
+            <div className="mode-switch" aria-label="Choix du mode">
+              <button
+                type="button"
+                className={state.mode === "college" ? "mode-active" : ""}
+                onClick={() => updateMode("college")}
+                aria-pressed={state.mode === "college"}
+              >
+                Collège
+              </button>
+              <button
+                type="button"
+                className={state.mode === "lycee" ? "mode-active" : ""}
+                onClick={() => updateMode("lycee")}
+                aria-pressed={state.mode === "lycee"}
+              >
+                Lycée
+              </button>
+            </div>
 
-      <section className="shortcut-board">
-        <div className="shortcut-note">
-          <p className="shortcut-note-title">
-            {state.mode === "college" ? "Raccourcis collège" : "Raccourcis lycée"}
-          </p>
-          <p className="shortcut-note-text">
-            Appuie sur une touche de raccourci pendant que la ligne est active,
-            ou clique sur un bouton pour insérer directement le symbole.
-          </p>
-          <div className="shortcut-help">
-            {hotkeyHelp.map((item) => (
-              <span key={item} className="shortcut-help-chip">
-                {item}
-              </span>
-            ))}
+            <div className="toolbar-actions">
+              <button
+                type="button"
+                className="toolbar-action primary"
+                onClick={exportPdf}
+                disabled={isExporting !== null}
+              >
+                {isExporting === "pdf" ? "Création PDF..." : "PDF"}
+              </button>
+              <button
+                type="button"
+                className="toolbar-action secondary"
+                onClick={exportWord}
+                disabled={isExporting !== null}
+              >
+                {isExporting === "word" ? "Création Word..." : "Word"}
+              </button>
+              <button type="button" className="toolbar-action ghost" onClick={() => window.print()}>
+                Imprimer
+              </button>
+              <button type="button" className="toolbar-action ghost" onClick={resetDocument}>
+                Nouveau
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="shortcut-groups">
-          {activeShortcuts.map((group) => (
-            <section key={group.name} className={`shortcut-group ${group.tone}`}>
-              <header className="shortcut-group-head">
-                <h2>{group.name}</h2>
-              </header>
-              <div className="shortcut-grid">
-                {group.items.map((shortcut) => (
+        <div className="toolbar-tab-row">
+          <button
+            type="button"
+            className={toolbarPanel === "text" ? "tab-active" : ""}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setToolbarPanel("text")}
+          >
+            Texte
+          </button>
+          <button
+            type="button"
+            className={toolbarPanel === "math" ? "tab-active" : ""}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setToolbarPanel("math")}
+          >
+            Maths
+          </button>
+          <p className="toolbar-helper">
+            Sélectionne du texte pour le mettre en gras, changer sa taille ou sa couleur.
+          </p>
+        </div>
+
+        {toolbarPanel === "text" ? (
+          <section className="toolbar-panel" aria-label="Outils de texte">
+            <div className="panel-block">
+              <h2>Texte</h2>
+              <div className="panel-chip-row">
+                <button
+                  type="button"
+                  className="chip-button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => runCommand("bold")}
+                >
+                  Gras
+                </button>
+                <button
+                  type="button"
+                  className="chip-button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => runCommand("removeFormat")}
+                >
+                  Effacer le style
+                </button>
+              </div>
+            </div>
+
+            <div className="panel-block">
+              <h2>Taille</h2>
+              <div className="panel-chip-row">
+                {FONT_SIZE_OPTIONS.map((option) => (
                   <button
-                    key={shortcut.id}
+                    key={option.id}
                     type="button"
-                    className="shortcut-tile"
-                    onClick={() => insertShortcut(shortcut)}
+                    className="chip-button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => runCommand("fontSize", option.value)}
                   >
-                    <span>{shortcut.label}</span>
-                    <small>{shortcut.hint}</small>
-                    <kbd>{shortcut.hotkey.toUpperCase()}</kbd>
+                    {option.label}
                   </button>
                 ))}
               </div>
-            </section>
-          ))}
-        </div>
-      </section>
+            </div>
 
-      <section className="document-stage">
-        <div className="document-head">
-          <div>
-            <h2>{state.title || "Document sans titre"}</h2>
-            <p>
-              {state.mode === "college"
-                ? "Mode collège · fractions, géométrie, puissances, probabilités"
-                : "Mode lycée · fonctions, limites, sommes, intégrales et trigonométrie"}
-            </p>
-          </div>
-          <div className="document-tips">
-            <span>Entrée : nouvelle ligne</span>
-            <span>Retour arrière sur ligne vide : supprime la ligne</span>
-          </div>
-        </div>
-
-        <div className="writer-paper">
-          <div className="writer-lines">
-            {state.lines.map((line, index) => (
-              <div key={line.id} className="writer-line-row">
-                <div className="line-gutter" aria-hidden="true">
-                  {index + 1}
+            <div className="panel-block">
+              <h2>Couleur</h2>
+              <div className="color-row">
+                {COLOR_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className="color-chip"
+                    style={{ backgroundColor: option.value }}
+                    aria-label={option.label}
+                    title={option.label}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => runCommand("foreColor", option.value)}
+                  />
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="toolbar-panel" aria-label="Raccourcis de maths">
+            {activeShortcutGroups.map((group) => (
+              <div key={group.name} className="panel-block">
+                <h2>{group.name}</h2>
+                <div className="shortcut-row">
+                  {group.items.map((shortcut) => (
+                    <button
+                      key={shortcut.id}
+                      type="button"
+                      className="shortcut-chip"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => insertAtCursor(shortcut.content)}
+                    >
+                      <span>{shortcut.label}</span>
+                      <small>{shortcut.hint}</small>
+                    </button>
+                  ))}
                 </div>
-                <WriterLineField
-                  value={line.latex}
-                  onFocus={() => setActiveLineId(line.id)}
-                  onChange={(value) => updateLine(line.id, value)}
-                  onEnter={() => addLine(line.id)}
-                  onDeleteEmpty={() => removeLine(line.id)}
-                  register={(element) => {
-                    fieldRefs.current[line.id] = element;
-                  }}
-                />
               </div>
             ))}
+          </section>
+        )}
+      </header>
+
+      <section className="editor-stage">
+        <div className="editor-sheet">
+          <div className="editor-sheet-head">
+            <div>
+              <p className="editor-sheet-badge">
+                {state.mode === "college" ? "Mode collège" : "Mode lycée"}
+              </p>
+              <h1>{state.title || "Document sans titre"}</h1>
+            </div>
+            <p className="editor-sheet-note">
+              Écris librement. Les boutons du haut insèrent les symboles là où se trouve le curseur.
+            </p>
           </div>
 
-          <button type="button" className="add-line-button" onClick={() => addLine()}>
-            + Ajouter une ligne
-          </button>
+          <div
+            ref={editorRef}
+            className="rich-editor"
+            contentEditable
+            suppressContentEditableWarning
+            data-empty={isEditorEmpty ? "true" : "false"}
+            onInput={handleInput}
+            onFocus={saveSelection}
+            onMouseUp={saveSelection}
+            onKeyUp={saveSelection}
+            onPaste={handlePaste}
+            onKeyDown={handleKeyDown}
+          />
         </div>
       </section>
 
       <div className="export-clone" aria-hidden="true">
-        <div className="export-paper" ref={exportRef}>
-          <header className="export-paper-head">
-            <div>
-              <p className="export-badge">
-                {state.mode === "college" ? "Mode collège" : "Mode lycée"}
-              </p>
-              <h3>{state.title || "Document sans titre"}</h3>
-            </div>
+        <div className="export-sheet" ref={exportRef}>
+          <header className="export-head">
+            <p className="editor-sheet-badge">
+              {state.mode === "college" ? "Mode collège" : "Mode lycée"}
+            </p>
+            <h2>{state.title || "Document sans titre"}</h2>
           </header>
 
-          <div className="export-lines">
-            {state.lines.map((line) => (
-              <div key={`export-${line.id}`} className="export-line-row">
-                <WriterLineField value={line.latex} readOnly />
-              </div>
-            ))}
-          </div>
+          <div
+            className="export-editor-content"
+            dangerouslySetInnerHTML={{
+              __html: state.content || "<p></p>"
+            }}
+          />
         </div>
       </div>
     </main>
