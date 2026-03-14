@@ -77,6 +77,15 @@ type FloatingSymbol = {
   fontSize: number;
 };
 
+type FloatingTextBox = {
+  id: string;
+  type: "textBox";
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+};
+
 type MathBlock = FractionBlock | DivisionBlock | PowerBlock | RootBlock;
 
 type WriterState = {
@@ -85,6 +94,7 @@ type WriterState = {
   textHtml: string;
   blocks: MathBlock[];
   symbols: FloatingSymbol[];
+  textBoxes: FloatingTextBox[];
 };
 
 type ModalState =
@@ -108,12 +118,13 @@ type InlineShortcutGroup = {
 };
 
 type DragState = {
-  itemType: "block" | "symbol";
+  itemType: "block" | "symbol" | "textBox";
   itemId: string;
   pointerOffsetX: number;
   pointerOffsetY: number;
   groupBlockPositions: Array<{ id: string; x: number; y: number }>;
   groupSymbolPositions: Array<{ id: string; x: number; y: number }>;
+  groupTextBoxPositions: Array<{ id: string; x: number; y: number }>;
   anchorX: number;
   anchorY: number;
 } | null;
@@ -142,6 +153,7 @@ type ToolbarDragMeta = {
 };
 
 const STORAGE_KEY = "maths-facile-free-layout-v1";
+const FLOATING_TEXTBOX_Y_OFFSET = 10;
 
 const DEFAULT_TEXT_HTML = [
   "<p><strong>Commence ici :</strong> écris librement ta méthode, tes calculs et ta réponse.</p>",
@@ -153,7 +165,8 @@ const DEFAULT_STATE: WriterState = {
   mode: "college",
   textHtml: DEFAULT_TEXT_HTML,
   blocks: [],
-  symbols: []
+  symbols: [],
+  textBoxes: []
 };
 
 const FONT_SIZE_OPTIONS = [
@@ -226,6 +239,11 @@ function safeFileName(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+function getTextBoxWidth(text: string) {
+  const visibleText = text.trim();
+  return Math.max(36, Math.min(920, visibleText.length * 14 + 12));
+}
+
 function parseStoredState(raw: string): WriterState | null {
   try {
     const parsed = JSON.parse(raw) as WriterState;
@@ -241,7 +259,8 @@ function parseStoredState(raw: string): WriterState | null {
 
     return {
       ...parsed,
-      symbols: Array.isArray(parsed.symbols) ? parsed.symbols : []
+      symbols: Array.isArray(parsed.symbols) ? parsed.symbols : [],
+      textBoxes: Array.isArray((parsed as { textBoxes?: unknown }).textBoxes) ? (parsed as { textBoxes: FloatingTextBox[] }).textBoxes : []
     };
   } catch {
     return null;
@@ -340,6 +359,8 @@ export function MathWorkbook() {
   const [modalState, setModalState] = useState<ModalState>(null);
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const [selectedSymbolIds, setSelectedSymbolIds] = useState<string[]>([]);
+  const [selectedTextBoxIds, setSelectedTextBoxIds] = useState<string[]>([]);
+  const [editingTextBoxId, setEditingTextBoxId] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "word" | null>(null);
   const [isCanvasDropActive, setIsCanvasDropActive] = useState(false);
@@ -352,12 +373,16 @@ export function MathWorkbook() {
   const pendingSelectionRef = useRef<PendingSelection>(null);
   const blocksRef = useRef<MathBlock[]>([]);
   const symbolsRef = useRef<FloatingSymbol[]>([]);
+  const textBoxesRef = useRef<FloatingTextBox[]>([]);
   const selectedBlockIdsRef = useRef<string[]>([]);
   const selectedSymbolIdsRef = useRef<string[]>([]);
+  const selectedTextBoxIdsRef = useRef<string[]>([]);
   const toolbarDragUntilRef = useRef(0);
   const toolbarDragMetaRef = useRef<ToolbarDragMeta | null>(null);
   const blockNodeRefs = useRef<Record<string, HTMLElement | null>>({});
   const symbolNodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const textBoxNodeRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingFocusTextBoxIdRef = useRef<string | null>(null);
 
   const activeInlineShortcuts = useMemo(
     () =>
@@ -372,9 +397,10 @@ export function MathWorkbook() {
     () => STRUCTURED_TOOLS.filter((tool) => tool.modes.includes(state.mode)),
     [state.mode]
   );
-  const selectedBlockId = selectedBlockIds.length === 1 && selectedSymbolIds.length === 0 ? selectedBlockIds[0] : null;
-  const selectedSymbolId = selectedSymbolIds.length === 1 && selectedBlockIds.length === 0 ? selectedSymbolIds[0] : null;
-  const selectedCount = selectedBlockIds.length + selectedSymbolIds.length;
+  const selectedBlockId = selectedBlockIds.length === 1 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 ? selectedBlockIds[0] : null;
+  const selectedSymbolId = selectedSymbolIds.length === 1 && selectedBlockIds.length === 0 && selectedTextBoxIds.length === 0 ? selectedSymbolIds[0] : null;
+  const selectedTextBoxId = selectedTextBoxIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 ? selectedTextBoxIds[0] : null;
+  const selectedCount = selectedBlockIds.length + selectedSymbolIds.length + selectedTextBoxIds.length;
   const selectedBlock = useMemo(
     () => state.blocks.find((block) => block.id === selectedBlockId) ?? null,
     [selectedBlockId, state.blocks]
@@ -382,6 +408,10 @@ export function MathWorkbook() {
   const selectedSymbol = useMemo(
     () => state.symbols.find((symbol) => symbol.id === selectedSymbolId) ?? null,
     [selectedSymbolId, state.symbols]
+  );
+  const selectedTextBox = useMemo(
+    () => state.textBoxes.find((textBox) => textBox.id === selectedTextBoxId) ?? null,
+    [selectedTextBoxId, state.textBoxes]
   );
 
   useEffect(() => {
@@ -413,12 +443,29 @@ export function MathWorkbook() {
   useEffect(() => {
     blocksRef.current = state.blocks;
     symbolsRef.current = state.symbols;
-  }, [state.blocks, state.symbols]);
+    textBoxesRef.current = state.textBoxes;
+  }, [state.blocks, state.symbols, state.textBoxes]);
 
   useEffect(() => {
     selectedBlockIdsRef.current = selectedBlockIds;
     selectedSymbolIdsRef.current = selectedSymbolIds;
-  }, [selectedBlockIds, selectedSymbolIds]);
+    selectedTextBoxIdsRef.current = selectedTextBoxIds;
+  }, [selectedBlockIds, selectedSymbolIds, selectedTextBoxIds]);
+
+  useEffect(() => {
+    if (!pendingFocusTextBoxIdRef.current) {
+      return;
+    }
+
+    const node = textBoxNodeRefs.current[pendingFocusTextBoxIdRef.current]?.querySelector("input");
+
+    if (!node) {
+      return;
+    }
+
+    node.focus();
+    pendingFocusTextBoxIdRef.current = null;
+  }, [state.textBoxes]);
 
   useEffect(() => {
     const element = editorRef.current;
@@ -498,11 +545,34 @@ export function MathWorkbook() {
             x: Math.max(18, Math.min(bounds.width - 24, dragged.x + deltaX)),
             y: Math.max(18, Math.min(bounds.height - 24, dragged.y + deltaY))
           };
+        }),
+        textBoxes: current.textBoxes.map((textBox) => {
+          const dragged = dragRef.current?.groupTextBoxPositions.find((item) => item.id === textBox.id);
+
+          if (!dragged) {
+            return textBox;
+          }
+
+          return {
+            ...textBox,
+            x: Math.max(18, Math.min(bounds.width - 24, dragged.x + deltaX)),
+            y: Math.max(18, Math.min(bounds.height - 24, dragged.y + deltaY))
+          };
         })
       }));
     }
 
     function handleMouseUp() {
+      if (pendingSelectionRef.current && !pendingSelectionRef.current.started) {
+        const textBox = createFloatingTextBox(pendingSelectionRef.current.originX, pendingSelectionRef.current.originY);
+
+        setState((current) => ({
+          ...current,
+          textBoxes: [...current.textBoxes, textBox]
+        }));
+        beginTextBoxEditing(textBox.id);
+      }
+
       dragRef.current = null;
       pendingSelectionRef.current = null;
       setSelectionRect(null);
@@ -563,6 +633,17 @@ export function MathWorkbook() {
     } satisfies FloatingSymbol;
   }
 
+  function createFloatingTextBox(x: number, y: number) {
+    return {
+      id: createId("text"),
+      type: "textBox",
+      text: "",
+      x,
+      y: Math.max(18, y - FLOATING_TEXTBOX_Y_OFFSET),
+      width: 100
+    } satisfies FloatingTextBox;
+  }
+
   function getCanvasDropPosition(clientX: number, clientY: number, offsetX = 0, offsetY = 0) {
     const canvas = canvasRef.current;
 
@@ -593,6 +674,7 @@ export function MathWorkbook() {
   function clearFloatingSelection() {
     setSelectedBlockIds([]);
     setSelectedSymbolIds([]);
+    setSelectedTextBoxIds([]);
   }
 
   function selectSingleBlock(blockId: string) {
@@ -603,6 +685,13 @@ export function MathWorkbook() {
   function selectSingleSymbol(symbolId: string) {
     setSelectedSymbolIds([symbolId]);
     setSelectedBlockIds([]);
+    setSelectedTextBoxIds([]);
+  }
+
+  function selectSingleTextBox(textBoxId: string) {
+    setSelectedTextBoxIds([textBoxId]);
+    setSelectedBlockIds([]);
+    setSelectedSymbolIds([]);
   }
 
   function getCanvasPoint(clientX: number, clientY: number) {
@@ -672,9 +761,27 @@ export function MathWorkbook() {
         return right >= normalized.left && left <= normalized.right && bottom >= normalized.top && top <= normalized.bottom;
       })
       .map((symbol) => symbol.id);
+    const nextTextBoxIds = textBoxesRef.current
+      .filter((textBox) => {
+        const node = textBoxNodeRefs.current[textBox.id];
+
+        if (!node) {
+          return false;
+        }
+
+        const bounds = node.getBoundingClientRect();
+        const left = bounds.left - canvasBounds.left;
+        const top = bounds.top - canvasBounds.top;
+        const right = left + bounds.width;
+        const bottom = top + bounds.height;
+
+        return right >= normalized.left && left <= normalized.right && bottom >= normalized.top && top <= normalized.bottom;
+      })
+      .map((textBox) => textBox.id);
 
     setSelectedBlockIds(nextBlockIds);
     setSelectedSymbolIds(nextSymbolIds);
+    setSelectedTextBoxIds(nextTextBoxIds);
   }
 
   function beginAreaSelection(clientX: number, clientY: number) {
@@ -682,6 +789,22 @@ export function MathWorkbook() {
     pendingSelectionRef.current = { originX: point.x, originY: point.y, started: false };
     setSelectionRect(null);
     setIsCanvasInteracting(true);
+    clearFloatingSelection();
+    setOpenMenu(null);
+  }
+
+  function beginTextBoxEditing(textBoxId: string) {
+    setEditingTextBoxId(textBoxId);
+    selectSingleTextBox(textBoxId);
+    pendingFocusTextBoxIdRef.current = textBoxId;
+  }
+
+  function closeFloatingTextEditing() {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    setEditingTextBoxId(null);
     clearFloatingSelection();
     setOpenMenu(null);
   }
@@ -873,6 +996,23 @@ export function MathWorkbook() {
     }));
   }
 
+  function updateTextBox(textBoxId: string, updates: Partial<Pick<FloatingTextBox, "text" | "width">>) {
+    setState((current) => ({
+      ...current,
+      textBoxes: current.textBoxes.map((textBox) =>
+        textBox.id === textBoxId ? { ...textBox, ...updates } : textBox
+      )
+    }));
+  }
+
+  function removeTextBox(textBoxId: string) {
+    setState((current) => ({
+      ...current,
+      textBoxes: current.textBoxes.filter((textBox) => textBox.id !== textBoxId)
+    }));
+    setSelectedTextBoxIds((current) => current.filter((id) => id !== textBoxId));
+  }
+
   function removeSelectedItems() {
     if (selectedCount === 0) {
       return;
@@ -881,12 +1021,13 @@ export function MathWorkbook() {
     setState((current) => ({
       ...current,
       blocks: current.blocks.filter((block) => !selectedBlockIds.includes(block.id)),
-      symbols: current.symbols.filter((symbol) => !selectedSymbolIds.includes(symbol.id))
+      symbols: current.symbols.filter((symbol) => !selectedSymbolIds.includes(symbol.id)),
+      textBoxes: current.textBoxes.filter((textBox) => !selectedTextBoxIds.includes(textBox.id))
     }));
     clearFloatingSelection();
   }
 
-  function startDragging(itemType: "block" | "symbol", itemId: string, x: number, y: number, event: ReactMouseEvent<HTMLElement>) {
+  function startDragging(itemType: "block" | "symbol" | "textBox", itemId: string, x: number, y: number, event: ReactMouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
     setIsCanvasInteracting(true);
@@ -901,7 +1042,9 @@ export function MathWorkbook() {
     const keepCurrentSelection =
       itemType === "block"
         ? selectedBlockIdsRef.current.includes(itemId)
-        : selectedSymbolIdsRef.current.includes(itemId);
+        : itemType === "symbol"
+          ? selectedSymbolIdsRef.current.includes(itemId)
+          : selectedTextBoxIdsRef.current.includes(itemId);
     const currentBlockIds = keepCurrentSelection
       ? selectedBlockIdsRef.current
       : itemType === "block"
@@ -910,6 +1053,11 @@ export function MathWorkbook() {
     const currentSymbolIds = keepCurrentSelection
       ? selectedSymbolIdsRef.current
       : itemType === "symbol"
+        ? [itemId]
+        : [];
+    const currentTextBoxIds = keepCurrentSelection
+      ? selectedTextBoxIdsRef.current
+      : itemType === "textBox"
         ? [itemId]
         : [];
 
@@ -924,6 +1072,9 @@ export function MathWorkbook() {
       groupSymbolPositions: symbolsRef.current
         .filter((symbol) => currentSymbolIds.includes(symbol.id))
         .map((symbol) => ({ id: symbol.id, x: symbol.x, y: symbol.y })),
+      groupTextBoxPositions: textBoxesRef.current
+        .filter((textBox) => currentTextBoxIds.includes(textBox.id))
+        .map((textBox) => ({ id: textBox.id, x: textBox.x, y: textBox.y })),
       anchorX: x,
       anchorY: y
     };
@@ -931,8 +1082,10 @@ export function MathWorkbook() {
     if (!keepCurrentSelection) {
       if (itemType === "block") {
         selectSingleBlock(itemId);
-      } else {
+      } else if (itemType === "symbol") {
         selectSingleSymbol(itemId);
+      } else {
+        selectSingleTextBox(itemId);
       }
     }
   }
@@ -1510,6 +1663,18 @@ export function MathWorkbook() {
                 </button>
               </div>
             ) : null}
+
+            {selectedTextBox ? (
+              <div className="editor-local-toolbar-group editor-local-toolbar-group-block">
+                <span className="selected-block-label">Zone de texte</span>
+                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => beginTextBoxEditing(selectedTextBox.id)}>
+                  Modifier
+                </button>
+                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeTextBox(selectedTextBox.id)}>
+                  Supprimer
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div
@@ -1520,6 +1685,12 @@ export function MathWorkbook() {
             onDrop={handleCanvasDrop}
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) {
+                if (selectedTextBoxId) {
+                  event.preventDefault();
+                  closeFloatingTextEditing();
+                  return;
+                }
+
                 event.preventDefault();
                 beginAreaSelection(event.clientX, event.clientY);
                 return;
@@ -1536,6 +1707,12 @@ export function MathWorkbook() {
               suppressContentEditableWarning
               onMouseDown={(event) => {
                 if (event.target === event.currentTarget) {
+                  if (selectedTextBoxId) {
+                    event.preventDefault();
+                    closeFloatingTextEditing();
+                    return;
+                  }
+
                   event.preventDefault();
                   beginAreaSelection(event.clientX, event.clientY);
                 } else {
@@ -1587,6 +1764,70 @@ export function MathWorkbook() {
               >
                 {symbol.content}
               </button>
+            ))}
+
+            {state.textBoxes.map((textBox) => (
+              <article
+                key={textBox.id}
+                ref={(node) => {
+                  textBoxNodeRefs.current[textBox.id] = node;
+                }}
+                className={`floating-text-box ${selectedTextBoxIds.includes(textBox.id) ? "floating-text-box-selected" : ""}`}
+                style={{ left: `${textBox.x}px`, top: `${textBox.y}px`, width: `${textBox.width}px` }}
+                onMouseDown={(event) => {
+                  if (editingTextBoxId === textBox.id) {
+                    return;
+                  }
+
+                  startDragging("textBox", textBox.id, textBox.x, textBox.y, event);
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  beginTextBoxEditing(textBox.id);
+                }}
+              >
+                {editingTextBoxId === textBox.id ? (
+                  <input
+                    type="text"
+                    className="floating-text-input"
+                    value={textBox.text}
+                    placeholder="Écris ici"
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                      selectSingleTextBox(textBox.id);
+                    }}
+                    onFocus={() => {
+                      selectSingleTextBox(textBox.id);
+                    }}
+                    onChange={(event) => {
+                      const nextText = event.target.value;
+
+                      updateTextBox(textBox.id, {
+                        text: nextText,
+                        width: Math.max(100, getTextBoxWidth(nextText))
+                      });
+                    }}
+                    onBlur={(event) => {
+                      if (!event.currentTarget.value.trim()) {
+                        removeTextBox(textBox.id);
+                        setEditingTextBoxId(null);
+                        return;
+                      }
+
+                      updateTextBox(textBox.id, {
+                        text: event.currentTarget.value.trim(),
+                        width: getTextBoxWidth(event.currentTarget.value)
+                      });
+                      setEditingTextBoxId(null);
+                      clearFloatingSelection();
+                    }}
+                  />
+                ) : (
+                  <div className="floating-text-content">
+                    {textBox.text || "Zone de texte"}
+                  </div>
+                )}
+              </article>
             ))}
 
             {selectionRect ? (

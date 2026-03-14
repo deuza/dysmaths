@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "node -e \"require('fs').rmSync('.next-dev',{ recursive: true, force: true })\"",
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "predev": "node -e \"const path=require('path');const run=require(path.join(path.dirname(process.env.npm_package_json),'scripts','run-next.cjs'));run('predev-clean');\"",
+    "dev": "node -e \"const path=require('path');const run=require(path.join(path.dirname(process.env.npm_package_json),'scripts','run-next.cjs'));run('dev');\"",
+    "build": "node -e \"const path=require('path');const run=require(path.join(path.dirname(process.env.npm_package_json),'scripts','run-next.cjs'));run('build');\"",
+    "start": "node -e \"const path=require('path');const run=require(path.join(path.dirname(process.env.npm_package_json),'scripts','run-next.cjs'));run('start');\"",
     "lint": "next lint"
   },
   "dependencies": {
