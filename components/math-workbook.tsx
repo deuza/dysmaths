@@ -14,8 +14,8 @@ import { Document, ImageRun, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 
 type StudyMode = "college" | "lycee";
-type ToolbarPanel = "text" | "math";
 type StructuredTool = "fraction" | "division" | "power" | "root";
+type UtilityMenu = "settings" | "export" | null;
 
 type FractionBlock = {
   id: string;
@@ -140,8 +140,8 @@ const INLINE_SHORTCUT_GROUPS: InlineShortcutGroup[] = [
   {
     name: "Essentiels",
     items: [
-      { id: "equal", label: "Égal", hint: "Ajoute =", content: " = ", modes: ["college", "lycee"] },
-      { id: "neq", label: "Différent", hint: "Ajoute ≠", content: " ≠ ", modes: ["college", "lycee"] },
+      { id: "equal", label: "=", hint: "Ajoute =", content: " = ", modes: ["college", "lycee"] },
+      { id: "neq", label: "≠", hint: "Ajoute ≠", content: " ≠ ", modes: ["college", "lycee"] },
       { id: "leq", label: "≤", hint: "Inférieur ou égal", content: " ≤ ", modes: ["college", "lycee"] },
       { id: "geq", label: "≥", hint: "Supérieur ou égal", content: " ≥ ", modes: ["college", "lycee"] },
       { id: "times", label: "×", hint: "Multiplier", content: " × ", modes: ["college", "lycee"] },
@@ -291,7 +291,7 @@ function renderMathPreview(block: MathBlock) {
 
 export function MathWorkbook() {
   const [state, setState] = useState<WriterState>(DEFAULT_STATE);
-  const [toolbarPanel, setToolbarPanel] = useState<ToolbarPanel>("math");
+  const [openMenu, setOpenMenu] = useState<UtilityMenu>(null);
   const [modalState, setModalState] = useState<ModalState>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -537,6 +537,7 @@ export function MathWorkbook() {
   }
 
   function openInsertModal(type: StructuredTool) {
+    setOpenMenu(null);
     setModalState({
       mode: "insert",
       block: createBlock(type)
@@ -550,6 +551,7 @@ export function MathWorkbook() {
       return;
     }
 
+    setOpenMenu(null);
     setModalState({
       mode: "edit",
       block: { ...block }
@@ -623,7 +625,7 @@ export function MathWorkbook() {
   function resetDocument() {
     window.localStorage.removeItem(STORAGE_KEY);
     setState(DEFAULT_STATE);
-    setToolbarPanel("math");
+    setOpenMenu(null);
     setModalState(null);
     setSelectedBlockId(null);
     selectionRef.current = null;
@@ -832,167 +834,196 @@ export function MathWorkbook() {
     );
   }
 
+  function toggleMenu(menu: Exclude<UtilityMenu, null>) {
+    setOpenMenu((current) => (current === menu ? null : menu));
+  }
+
   return (
     <main className="editor-shell">
       <header className="top-toolbar">
-        <div className="toolbar-main-row">
-          <div className="toolbar-brand">
-            <p className="toolbar-eyebrow">Maths facile</p>
-            <label className="document-title-field">
-              <span>Titre</span>
-              <input
-                value={state.title}
-                onChange={(event) => setState((current) => ({ ...current, title: event.target.value }))}
-                placeholder="Mon document de maths"
-              />
-            </label>
-          </div>
-
-          <div className="toolbar-side">
-            <div className="mode-switch" aria-label="Choix du mode">
-              <button type="button" className={state.mode === "college" ? "mode-active" : ""} onClick={() => setState((current) => ({ ...current, mode: "college" }))}>
-                Collège
-              </button>
-              <button type="button" className={state.mode === "lycee" ? "mode-active" : ""} onClick={() => setState((current) => ({ ...current, mode: "lycee" }))}>
-                Lycée
-              </button>
+        <div className="top-toolbar-inner">
+          <div className="toolbar-row toolbar-row-primary">
+            <div className="toolbar-shortcut-group" aria-label="Blocs posés">
+              {activeStructuredTools.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className="toolbar-shortcut"
+                  title={tool.hint}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => openInsertModal(tool.id)}
+                >
+                  {tool.label}
+                </button>
+              ))}
             </div>
 
-            <div className="toolbar-actions">
-              <button type="button" className="toolbar-action primary" onClick={exportPdf} disabled={isExporting !== null}>
-                {isExporting === "pdf" ? "Création PDF..." : "PDF"}
+            <div className="toolbar-icon-actions">
+              <button
+                type="button"
+                className={`toolbar-icon-button ${openMenu === "export" ? "toolbar-icon-button-active" : ""}`}
+                aria-label="Exporter"
+                title="Exporter"
+                onClick={() => toggleMenu("export")}
+              >
+                ⤓
               </button>
-              <button type="button" className="toolbar-action secondary" onClick={exportWord} disabled={isExporting !== null}>
-                {isExporting === "word" ? "Création Word..." : "Word"}
+              <button
+                type="button"
+                className={`toolbar-icon-button ${openMenu === "settings" ? "toolbar-icon-button-active" : ""}`}
+                aria-label="Réglages"
+                title="Réglages"
+                onClick={() => toggleMenu("settings")}
+              >
+                ⚙
               </button>
-              <button type="button" className="toolbar-action ghost" onClick={() => window.print()}>
-                Imprimer
-              </button>
-              <button type="button" className="toolbar-action ghost" onClick={resetDocument}>
-                Nouveau
-              </button>
+            </div>
+          </div>
+
+          <div className="toolbar-row toolbar-row-secondary">
+            <div className="toolbar-shortcut-group toolbar-shortcut-group-symbols" aria-label="Raccourcis maths">
+              {activeInlineShortcuts.flatMap((group) => group.items).map((shortcut) => (
+                <button
+                  key={shortcut.id}
+                  type="button"
+                  className="toolbar-shortcut toolbar-shortcut-symbol"
+                  title={shortcut.hint}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => insertTextAtCursor(shortcut.content)}
+                >
+                  {shortcut.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="toolbar-tab-row">
-          <button type="button" className={toolbarPanel === "text" ? "tab-active" : ""} onClick={() => setToolbarPanel("text")}>
-            Texte
-          </button>
-          <button type="button" className={toolbarPanel === "math" ? "tab-active" : ""} onClick={() => setToolbarPanel("math")}>
-            Maths
-          </button>
-          <p className="toolbar-helper">
-            Le texte reste libre. Les opérations posées deviennent des objets que tu peux placer où tu veux sur la feuille.
-          </p>
-        </div>
-
-        {selectedBlock ? (
-          <section className="toolbar-panel selected-block-toolbar" aria-label="Bloc sélectionné">
-            <div className="panel-block">
-              <h2>{getBlockTitle(selectedBlock)}</h2>
-              <p className="toolbar-helper">
-                Fais glisser le bloc directement sur la feuille. Double-clique dessus pour le modifier.
-              </p>
-            </div>
-            <div className="panel-chip-row">
-              <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => openEditModal(selectedBlock.id)}>
-                Modifier
-              </button>
-              <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeBlock(selectedBlock.id)}>
-                Supprimer
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        {toolbarPanel === "text" ? (
-          <section className="toolbar-panel" aria-label="Outils de texte">
-            <div className="panel-block">
-              <h2>Texte</h2>
-              <div className="panel-chip-row">
-                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")}>
-                  Gras
-                </button>
-                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("removeFormat")}>
-                  Effacer le style
-                </button>
-              </div>
-            </div>
-
-            <div className="panel-block">
-              <h2>Taille</h2>
-              <div className="panel-chip-row">
-                {FONT_SIZE_OPTIONS.map((option) => (
-                  <button key={option.id} type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("fontSize", option.value)}>
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="panel-block">
-              <h2>Couleur</h2>
-              <div className="color-row">
-                {COLOR_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className="color-chip"
-                    style={{ backgroundColor: option.value }}
-                    aria-label={option.label}
-                    title={option.label}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => runCommand("foreColor", option.value)}
-                  />
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : (
-          <section className="toolbar-panel toolbar-panel-compact" aria-label="Outils de maths">
-            <div className="panel-block">
-              <h2>Blocs posés</h2>
-              <div className="shortcut-row">
-                {activeStructuredTools.map((tool) => (
-                  <button key={tool.id} type="button" className="shortcut-chip" onMouseDown={(event) => event.preventDefault()} onClick={() => openInsertModal(tool.id)}>
-                    <span>{tool.label}</span>
-                    <small>{tool.hint}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {activeInlineShortcuts.map((group) => (
-              <div key={group.name} className="panel-block">
-                <h2>{group.name}</h2>
-                <div className="shortcut-row">
-                  {group.items.map((shortcut) => (
-                    <button key={shortcut.id} type="button" className="shortcut-chip" onMouseDown={(event) => event.preventDefault()} onClick={() => insertTextAtCursor(shortcut.content)}>
-                      <span>{shortcut.label}</span>
-                      <small>{shortcut.hint}</small>
-                    </button>
-                  ))}
+        {openMenu ? (
+          <div className="toolbar-popover-shell">
+            {openMenu === "export" ? (
+              <section className="toolbar-panel toolbar-popover-panel toolbar-file-panel" aria-label="Exporter">
+                <div className="panel-block">
+                  <h2>Exporter</h2>
+                  <p className="toolbar-helper">Enregistre la feuille ou lance l’impression.</p>
                 </div>
-              </div>
-            ))}
-          </section>
-        )}
+                <div className="panel-chip-row">
+                  <button type="button" className="toolbar-action primary" onClick={exportPdf} disabled={isExporting !== null}>
+                    {isExporting === "pdf" ? "Création PDF..." : "PDF"}
+                  </button>
+                  <button type="button" className="toolbar-action secondary" onClick={exportWord} disabled={isExporting !== null}>
+                    {isExporting === "word" ? "Création Word..." : "Word"}
+                  </button>
+                  <button type="button" className="toolbar-action ghost" onClick={() => window.print()}>
+                    Imprimer
+                  </button>
+                  <button type="button" className="toolbar-action ghost" onClick={resetDocument}>
+                    Nouveau
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+            {openMenu === "settings" ? (
+              <section className="toolbar-panel toolbar-popover-panel toolbar-settings-panel" aria-label="Réglages">
+                <div className="panel-block">
+                  <h2>Réglages</h2>
+                  <p className="toolbar-helper">Choisis le niveau pour adapter les raccourcis affichés.</p>
+                </div>
+                <div className="panel-chip-row">
+                  <button
+                    type="button"
+                    className={`chip-button ${state.mode === "college" ? "chip-button-active" : ""}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setState((current) => ({ ...current, mode: "college" }))}
+                  >
+                    Collège
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip-button ${state.mode === "lycee" ? "chip-button-active" : ""}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setState((current) => ({ ...current, mode: "lycee" }))}
+                  >
+                    Lycée
+                  </button>
+                </div>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       <section className="editor-stage">
         <div className="editor-sheet">
           <div className="editor-sheet-head">
             <div>
-              <p className="editor-sheet-badge">{state.mode === "college" ? "Mode collège" : "Mode lycée"}</p>
-              <h1>{state.title || "Document sans titre"}</h1>
+              <input
+                className="sheet-title-input"
+                value={state.title}
+                onChange={(event) => setState((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Document sans titre"
+                aria-label="Titre du document"
+              />
             </div>
             <p className="editor-sheet-note">
-              Écris librement, puis attrape la poignée d&apos;un bloc posé pour le placer n&apos;importe où sur la feuille.
+              Écris librement, puis déplace les opérations posées où tu veux sur la feuille.
             </p>
           </div>
 
-          <div className="document-canvas" ref={canvasRef} onMouseDown={() => setSelectedBlockId(null)}>
+          <div className="editor-local-toolbar" aria-label="Mise en forme du texte">
+            <div className="editor-local-toolbar-group">
+              <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("bold")}>
+                Gras
+              </button>
+              <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("removeFormat")}>
+                Effacer
+              </button>
+            </div>
+
+            <div className="editor-local-toolbar-group">
+              {FONT_SIZE_OPTIONS.map((option) => (
+                <button key={option.id} type="button" className="chip-button chip-button-compact" onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand("fontSize", option.value)}>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="editor-local-toolbar-group">
+              {COLOR_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className="color-chip"
+                  style={{ backgroundColor: option.value }}
+                  aria-label={option.label}
+                  title={option.label}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => runCommand("foreColor", option.value)}
+                />
+              ))}
+            </div>
+
+            {selectedBlock ? (
+              <div className="editor-local-toolbar-group editor-local-toolbar-group-block">
+                <span className="selected-block-label">{getBlockTitle(selectedBlock)}</span>
+                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => openEditModal(selectedBlock.id)}>
+                  Modifier
+                </button>
+                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeBlock(selectedBlock.id)}>
+                  Supprimer
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div
+            className="document-canvas"
+            ref={canvasRef}
+            onMouseDown={() => {
+              setSelectedBlockId(null);
+              setOpenMenu(null);
+            }}
+          >
             <div
               ref={editorRef}
               className="canvas-editor"
