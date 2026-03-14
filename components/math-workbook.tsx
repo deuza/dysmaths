@@ -314,6 +314,10 @@ export function MathWorkbook() {
     () => STRUCTURED_TOOLS.filter((tool) => tool.modes.includes(state.mode)),
     [state.mode]
   );
+  const selectedBlock = useMemo(
+    () => state.blocks.find((block) => block.id === selectedBlockId) ?? null,
+    [selectedBlockId, state.blocks]
+  );
 
   useEffect(() => {
     setIsHydrated(true);
@@ -588,17 +592,6 @@ export function MathWorkbook() {
     setModalState(null);
   }
 
-  function resizeBlock(blockId: string, delta: number) {
-    setState((current) => ({
-      ...current,
-      blocks: current.blocks.map((block) =>
-        block.id === blockId
-          ? { ...block, width: Math.max(180, Math.min(420, block.width + delta)) }
-          : block
-      )
-    }));
-  }
-
   function removeBlock(blockId: string) {
     setState((current) => ({
       ...current,
@@ -607,7 +600,7 @@ export function MathWorkbook() {
     setSelectedBlockId((current) => (current === blockId ? null : current));
   }
 
-  function startDragging(blockId: string, event: ReactMouseEvent<HTMLButtonElement>) {
+  function startDragging(blockId: string, event: ReactMouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -894,6 +887,25 @@ export function MathWorkbook() {
           </p>
         </div>
 
+        {selectedBlock ? (
+          <section className="toolbar-panel selected-block-toolbar" aria-label="Bloc sélectionné">
+            <div className="panel-block">
+              <h2>{getBlockTitle(selectedBlock)}</h2>
+              <p className="toolbar-helper">
+                Fais glisser le bloc directement sur la feuille. Double-clique dessus pour le modifier.
+              </p>
+            </div>
+            <div className="panel-chip-row">
+              <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => openEditModal(selectedBlock.id)}>
+                Modifier
+              </button>
+              <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeBlock(selectedBlock.id)}>
+                Supprimer
+              </button>
+            </div>
+          </section>
+        ) : null}
+
         {toolbarPanel === "text" ? (
           <section className="toolbar-panel" aria-label="Outils de texte">
             <div className="panel-block">
@@ -997,43 +1009,16 @@ export function MathWorkbook() {
               <article
                 key={block.id}
                 className={`floating-math-block ${selectedBlockId === block.id ? "floating-math-block-selected" : ""}`}
-                style={{ left: `${block.x}px`, top: `${block.y}px`, width: `${block.width}px` }}
+                style={{ left: `${block.x}px`, top: `${block.y}px` }}
                 onMouseDown={(event) => {
-                  event.stopPropagation();
                   setSelectedBlockId(block.id);
+                  startDragging(block.id, event);
                 }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   openEditModal(block.id);
                 }}
               >
-                <div className="floating-math-head">
-                  <div className="floating-math-title">
-                    <button type="button" className="floating-drag-handle" onMouseDown={(event) => startDragging(block.id, event)} aria-label="Déplacer le bloc" title="Déplacer le bloc">
-                      <span />
-                      <span />
-                      <span />
-                      <span />
-                      <span />
-                      <span />
-                    </button>
-                    <p className="math-block-kind">{getBlockTitle(block)}</p>
-                  </div>
-                  <div className="floating-math-actions">
-                    <button type="button" onClick={() => resizeBlock(block.id, -28)}>
-                      -
-                    </button>
-                    <button type="button" onClick={() => resizeBlock(block.id, 28)}>
-                      +
-                    </button>
-                    <button type="button" onClick={() => openEditModal(block.id)}>
-                      Modifier
-                    </button>
-                    <button type="button" onClick={() => removeBlock(block.id)}>
-                      Supprimer
-                    </button>
-                  </div>
-                </div>
                 {renderMathPreview(block)}
               </article>
             ))}
