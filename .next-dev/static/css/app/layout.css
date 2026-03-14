@@ -669,6 +669,189 @@ input {
   font-weight: 800;
 }
 
+.editor-loading-card {
+  margin: 3rem auto;
+  max-width: 36rem;
+  padding: 1.4rem 1.6rem;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 251, 244, 0.88);
+  box-shadow: var(--shadow);
+}
+
+.lexical-editor-frame {
+  position: relative;
+}
+
+.lexical-editor-input,
+.lexical-export-root {
+  min-height: 62vh;
+  padding: 1.25rem 1.4rem 1.7rem 4.8rem;
+  border-radius: 22px;
+  background:
+    linear-gradient(90deg, transparent 0, transparent 3.3rem, var(--paper-margin) 3.3rem, var(--paper-margin) 3.42rem, transparent 3.42rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent 2.95rem, var(--paper-line) 2.95rem, var(--paper-line) 3.02rem),
+    var(--paper);
+  border: 1px solid rgba(92, 108, 129, 0.14);
+  font-size: 1.18rem;
+  line-height: 1.7;
+  outline: none;
+}
+
+.lexical-export-root {
+  min-height: 0;
+}
+
+.lexical-placeholder {
+  position: absolute;
+  left: 4.9rem;
+  top: 1.3rem;
+  color: rgba(92, 103, 117, 0.72);
+  pointer-events: none;
+}
+
+.lexical-paragraph {
+  margin: 0 0 0.45rem;
+}
+
+.lexical-bold {
+  font-weight: 800;
+}
+
+.lexical-math-node-shell {
+  margin: 0.85rem 0;
+}
+
+.lexical-math-node {
+  position: relative;
+  display: grid;
+  grid-gap: 0.85rem;
+  gap: 0.85rem;
+  padding: 0.95rem 1rem;
+  border-radius: 22px;
+  border: 2px solid rgba(92, 108, 129, 0.1);
+  background: rgba(255, 251, 244, 0.96);
+  box-shadow: 0 12px 30px rgba(31, 45, 61, 0.08);
+  cursor: default;
+}
+
+.lexical-math-node-drag-source {
+  opacity: 0.56;
+}
+
+.lexical-math-node-selected {
+  border-color: rgba(217, 119, 69, 0.44);
+  box-shadow:
+    0 14px 36px rgba(31, 45, 61, 0.12),
+    0 0 0 4px rgba(217, 119, 69, 0.12);
+}
+
+.lexical-math-node-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.lexical-math-node-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.lexical-inline-drag-handle {
+  display: grid;
+  grid-template-columns: repeat(2, 5px);
+  grid-gap: 4px 5px;
+  gap: 4px 5px;
+  align-content: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(92, 108, 129, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  cursor: -webkit-grab;
+  cursor: grab;
+}
+
+.lexical-inline-drag-handle:active {
+  cursor: -webkit-grabbing;
+  cursor: grabbing;
+}
+
+.lexical-inline-drag-handle span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(92, 103, 117, 0.86);
+}
+
+.math-block-kind {
+  margin: 0;
+  font-size: 0.84rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 800;
+  color: var(--accent-strong);
+}
+
+.math-block-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.math-block-controls button {
+  min-height: 36px;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(92, 108, 129, 0.16);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.math-block-preview {
+  display: grid;
+  grid-gap: 0.6rem;
+  gap: 0.6rem;
+}
+
+.lexical-drop-indicator {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.9rem;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(217, 119, 69, 0.12), rgba(217, 119, 69, 0.95), rgba(217, 119, 69, 0.12));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.lexical-drop-indicator-top {
+  top: -0.45rem;
+}
+
+.lexical-drop-indicator-bottom {
+  bottom: -0.45rem;
+}
+
+.lexical-drop-indicator-visible {
+  opacity: 1;
+}
+
+.lexical-export-root .math-block-controls {
+  display: none;
+}
+
+.lexical-export-root .lexical-inline-drag-handle,
+.lexical-export-root .lexical-drop-indicator {
+  display: none;
+}
+
 @media (max-width: 1100px) {
   .toolbar-main-row {
     grid-template-columns: 1fr;
@@ -732,6 +915,16 @@ input {
     font-size: 1.08rem;
   }
 
+  .lexical-editor-input,
+  .lexical-export-root {
+    padding-left: 3.8rem;
+    font-size: 1.08rem;
+  }
+
+  .lexical-placeholder {
+    left: 3.9rem;
+  }
+
   .toolbar-panel-compact {
     max-height: 9rem;
   }
@@ -747,6 +940,11 @@ input {
   .color-row {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .math-block-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .color-row {
@@ -774,6 +972,139 @@ input {
     background: transparent;
     border: none;
     box-shadow: none;
+  }
+}
+
+.document-canvas {
+  position: relative;
+  min-height: 1123px;
+  border-radius: 24px;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, transparent 0, transparent 3.3rem, var(--paper-margin) 3.3rem, var(--paper-margin) 3.42rem, transparent 3.42rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent 2.95rem, var(--paper-line) 2.95rem, var(--paper-line) 3.02rem),
+    var(--paper);
+  border: 1px solid rgba(92, 108, 129, 0.14);
+}
+
+.canvas-editor {
+  position: absolute;
+  inset: 0;
+  padding: 1.25rem 1.4rem 1.7rem 4.8rem;
+  color: var(--ink);
+  font-size: 1.18rem;
+  line-height: 1.7;
+  outline: none;
+}
+
+.canvas-editor p,
+.canvas-editor div {
+  margin: 0 0 0.42rem;
+}
+
+.floating-math-block {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  grid-gap: 0.7rem;
+  gap: 0.7rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 22px;
+  border: 2px solid rgba(92, 108, 129, 0.14);
+  background: rgba(255, 251, 244, 0.98);
+  box-shadow: 0 14px 28px rgba(31, 45, 61, 0.12);
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+}
+
+.floating-math-block-selected {
+  border-color: rgba(217, 119, 69, 0.48);
+  box-shadow:
+    0 16px 34px rgba(31, 45, 61, 0.14),
+    0 0 0 4px rgba(217, 119, 69, 0.12);
+}
+
+.floating-math-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.floating-math-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.floating-math-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.floating-math-actions button,
+.floating-drag-handle {
+  min-height: 36px;
+  padding: 0.42rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(92, 108, 129, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.floating-drag-handle {
+  display: grid;
+  grid-template-columns: repeat(2, 5px);
+  grid-gap: 4px 5px;
+  gap: 4px 5px;
+  align-content: center;
+  justify-content: center;
+  width: 34px;
+  padding: 0;
+  cursor: -webkit-grab;
+  cursor: grab;
+}
+
+.floating-drag-handle:active {
+  cursor: -webkit-grabbing;
+  cursor: grabbing;
+}
+
+.floating-drag-handle span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(92, 103, 117, 0.86);
+}
+
+@media (max-width: 760px) {
+  .document-canvas {
+    min-height: 960px;
+  }
+
+  .canvas-editor {
+    padding-left: 3.8rem;
+    font-size: 1.08rem;
+  }
+
+  .floating-math-block {
+    max-width: min(82vw, 24rem);
+  }
+}
+
+@media print {
+  .document-canvas {
+    border: none;
+    box-shadow: none;
+  }
+
+  .floating-math-actions,
+  .floating-drag-handle {
+    display: none !important;
   }
 }
 
