@@ -245,6 +245,18 @@ const CANVAS_GRID_TOP_REM = PAPER_LINE_STEP_REM;
 const MAX_SNAP_THRESHOLD_PX = 10;
 const CANVAS_LINE_BASELINE_OFFSET_PX = 5;
 const DEFAULT_ACTIVE_COLOR = "#1f2d3d";
+const MM_TO_PX = 96 / 25.4;
+const SEYES_MAJOR_MM = 8;
+const SEYES_MINOR_MM = 2;
+const SEYES_MARGIN_CM = 4;
+
+function mmToPx(mm: number) {
+  return mm * MM_TO_PX;
+}
+
+function cmToPx(cm: number) {
+  return mmToPx(cm * 10);
+}
 
 const DEFAULT_TEXT_HTML = "";
 
@@ -356,7 +368,8 @@ function getTextBoxWidth(text: string) {
 }
 
 function getSheetMetrics(sheetStyle: SheetStyle, rem: number) {
-  const seyesStep = PAPER_LINE_STEP_REM * rem;
+  const seyesStep = mmToPx(SEYES_MAJOR_MM);
+  const seyesMinorStep = mmToPx(SEYES_MINOR_MM);
 
   switch (sheetStyle) {
     case "large-grid":
@@ -371,10 +384,10 @@ function getSheetMetrics(sheetStyle: SheetStyle, rem: number) {
       };
     case "small-grid":
       return {
-        snapXStep: seyesStep / 2,
-        snapYStep: seyesStep / 2,
-        originX: seyesStep / 2,
-        originY: seyesStep / 2,
+        snapXStep: seyesMinorStep * 2,
+        snapYStep: seyesMinorStep * 2,
+        originX: seyesMinorStep * 2,
+        originY: seyesMinorStep * 2,
         baselineOffset: CANVAS_LINE_BASELINE_OFFSET_PX,
         snapX: true,
         snapY: true
@@ -385,16 +398,16 @@ function getSheetMetrics(sheetStyle: SheetStyle, rem: number) {
         snapYStep: seyesStep,
         originX: CANVAS_GRID_LEFT_REM * rem,
         originY: seyesStep,
-        baselineOffset: 0,
-        snapX: false,
-        snapY: false
+        baselineOffset: CANVAS_LINE_BASELINE_OFFSET_PX,
+        snapX: true,
+        snapY: true
       };
     case "seyes":
     default:
       return {
-        snapXStep: seyesStep / 2,
+        snapXStep: seyesStep,
         snapYStep: seyesStep,
-        originX: CANVAS_GRID_LEFT_REM * rem,
+        originX: seyesStep,
         originY: seyesStep,
         baselineOffset: CANVAS_LINE_BASELINE_OFFSET_PX,
         snapX: true,
