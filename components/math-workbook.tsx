@@ -306,13 +306,175 @@ function getStrokeBounds(points: FreehandPoint[]) {
   };
 }
 
-function createStrokePath(points: FreehandPoint[]) {
+function createStrokePath(points: FreehandPoint[]): string {
   if (points.length === 0) {
     return "";
   }
 
   const [firstPoint, ...otherPoints] = points;
   return `M ${firstPoint.x} ${firstPoint.y} ${otherPoints.map((point) => `L ${point.x} ${point.y}`).join(" ")}`;
+}
+
+function getPointDistance(left: FreehandPoint, right: FreehandPoint): number {
+  return Math.hypot(right.x - left.x, right.y - left.y);
+}
+
+function getStrokeLength(points: FreehandPoint[]): number {
+  let length = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    length += getPointDistance(points[index - 1], points[index]);
+  }
+
+  return length;
+}
+
+function getDistanceToSegment(point: FreehandPoint, start: FreehandPoint, end: FreehandPoint): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const squaredLength = dx * dx + dy * dy;
+
+  if (squaredLength === 0) {
+    return getPointDistance(point, start);
+  }
+
+  const projection = ((point.x - start.x) * dx + (point.y - start.y) * dy) / squaredLength;
+  const clampedProjection = Math.max(0, Math.min(1, projection));
+
+  return Math.hypot(point.x - (start.x + clampedProjection * dx), point.y - (start.y + clampedProjection * dy));
+}
+
+function simplifyStrokePoints(points: FreehandPoint[], epsilon: number): FreehandPoint[] {
+  if (points.length <= 2) {
+    return points;
+  }
+
+  let maxDistance = 0;
+  let splitIndex = 0;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const distance = getDistanceToSegment(points[index], points[0], points[points.length - 1]);
+
+    if (distance > maxDistance) {
+      maxDistance = distance;
+      splitIndex = index;
+    }
+  }
+
+  if (maxDistance <= epsilon) {
+    return [points[0], points[points.length - 1]];
+  }
+
+  const left = simplifyStrokePoints(points.slice(0, splitIndex + 1), epsilon);
+  const right = simplifyStrokePoints(points.slice(splitIndex), epsilon);
+  return [...left.slice(0, -1), ...right];
+}
+
+function getPolygonArea(points: FreehandPoint[]): number {
+  let area = 0;
+
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    area += current.x * next.y - next.x * current.y;
+  }
+
+  return Math.abs(area) / 2;
+}
+
+function isNearRightAngle(previous: FreehandPoint, current: FreehandPoint, next: FreehandPoint): boolean {
+  const leftVector = { x: previous.x - current.x, y: previous.y - current.y };
+  const rightVector = { x: next.x - current.x, y: next.y - current.y };
+  const leftLength = Math.hypot(leftVector.x, leftVector.y);
+  const rightLength = Math.hypot(rightVector.x, rightVector.y);
+
+  if (leftLength === 0 || rightLength === 0) {
+    return false;
+  }
+
+  const dot = (leftVector.x * rightVector.x + leftVector.y * rightVector.y) / (leftLength * rightLength);
+  return Math.abs(dot) < 0.34;
+}
+
+function createCirclePoints(centerX: number, centerY: number, radius: number, segments = 28): FreehandPoint[] {
+  return Array.from({ length: segments + 1 }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / segments;
+    return {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius
+    };
+  });
+}
+
+function normalizeStrokeShape(points: FreehandPoint[]): FreehandPoint[] {
+  if (points.length < 2) {
+    return points;
+  }
+
+  const bounds = getStrokeBounds(points);
+  const diagonal = Math.hypot(bounds.width, bounds.height);
+  const totalLength = getStrokeLength(points);
+  const startPoint = points[0];
+  const endPoint = points[points.length - 1];
+  const endDistance = getPointDistance(startPoint, endPoint);
+  const isClosed = diagonal > 20 && endDistance <= Math.max(14, diagonal * 0.2);
+
+  if (totalLength > 28 && endDistance / Math.max(totalLength, 1) > 0.9) {
+    const maxDeviation = points.reduce((max, point) => Math.max(max, getDistanceToSegment(point, startPoint, endPoint)), 0);
+
+    if (maxDeviation <= Math.max(6, diagonal * 0.08)) {
+      return [startPoint, endPoint];
+    }
+  }
+
+  if (!isClosed) {
+    return points;
+  }
+
+  const simplified = simplifyStrokePoints(points, Math.max(10, diagonal * 0.045));
+  const polygon = simplified.length > 2 ? simplified.slice(0, -1) : simplified;
+
+  if (polygon.length === 3 && getPolygonArea(polygon) > 80) {
+    return [...polygon, polygon[0]];
+  }
+
+  if (polygon.length === 4 && getPolygonArea(polygon) > 120) {
+    const isRectangle = polygon.every((point, index) =>
+      isNearRightAngle(polygon[(index + polygon.length - 1) % polygon.length], point, polygon[(index + 1) % polygon.length])
+    );
+
+    if (isRectangle) {
+      return [
+        { x: bounds.x, y: bounds.y },
+        { x: bounds.x + bounds.width, y: bounds.y },
+        { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+        { x: bounds.x, y: bounds.y + bounds.height },
+        { x: bounds.x, y: bounds.y }
+      ];
+    }
+
+    return [...polygon, polygon[0]];
+  }
+
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  const radii = points.map((point) => Math.hypot(point.x - centerX, point.y - centerY));
+  const averageRadius = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  const radiusVariance = radii.reduce((sum, value) => sum + Math.abs(value - averageRadius), 0) / radii.length;
+  const aspectRatio = bounds.width / Math.max(1, bounds.height);
+  const looksPolygonal = polygon.length >= 3 && polygon.length <= 5;
+
+  if (
+    !looksPolygonal &&
+    averageRadius > 12 &&
+    aspectRatio > 0.72 &&
+    aspectRatio < 1.38 &&
+    radiusVariance / Math.max(averageRadius, 1) < 0.2
+  ) {
+    return createCirclePoints(centerX, centerY, averageRadius);
+  }
+
+  return points;
 }
 
 function cloneWriterState(value: WriterState) {
@@ -890,9 +1052,11 @@ export function MathWorkbook() {
         setIsCanvasInteracting(false);
 
         if (points.length >= 2) {
+          const normalizedPoints = normalizeStrokeShape(points);
+
           setState((current) => ({
             ...current,
-            strokes: [...current.strokes, { id: createId("stroke"), points }]
+            strokes: [...current.strokes, { id: createId("stroke"), points: normalizedPoints }]
           }));
           scheduleTransientHistoryCommit("edit");
         } else {
