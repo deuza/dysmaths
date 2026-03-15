@@ -107,7 +107,6 @@ type MathBlock = FractionBlock | DivisionBlock | PowerBlock | RootBlock;
 type WriterState = {
   title: string;
   mode: StudyMode;
-  advancedMode: boolean;
   textHtml: string;
   blocks: MathBlock[];
   symbols: FloatingSymbol[];
@@ -212,7 +211,6 @@ const DEFAULT_TEXT_HTML = [
 const DEFAULT_STATE: WriterState = {
   title: "Mon document de maths",
   mode: "college",
-  advancedMode: false,
   textHtml: DEFAULT_TEXT_HTML,
   blocks: [],
   symbols: [],
@@ -507,7 +505,6 @@ function parseStoredState(raw: string): WriterState | null {
     if (
       typeof parsed.title !== "string" ||
       (parsed.mode !== "college" && parsed.mode !== "lycee") ||
-      typeof (parsed as { advancedMode?: unknown }).advancedMode !== "boolean" && typeof (parsed as { advancedMode?: unknown }).advancedMode !== "undefined" ||
       typeof parsed.textHtml !== "string" ||
       !Array.isArray(parsed.blocks)
     ) {
@@ -516,7 +513,6 @@ function parseStoredState(raw: string): WriterState | null {
 
     return {
       ...parsed,
-      advancedMode: typeof (parsed as { advancedMode?: unknown }).advancedMode === "boolean" ? parsed.advancedMode : false,
       symbols: Array.isArray(parsed.symbols) ? parsed.symbols : [],
       textBoxes: Array.isArray((parsed as { textBoxes?: unknown }).textBoxes) ? (parsed as { textBoxes: FloatingTextBox[] }).textBoxes : [],
       strokes: Array.isArray((parsed as { strokes?: unknown }).strokes)
@@ -833,12 +829,6 @@ export function MathWorkbook() {
   }, [advancedTool]);
 
   useEffect(() => {
-    if (!state.advancedMode) {
-      setAdvancedTool(null);
-    }
-  }, [state.advancedMode]);
-
-  useEffect(() => {
     if (!isHydrated) {
       return;
     }
@@ -1069,7 +1059,7 @@ export function MathWorkbook() {
       const draggedSession = dragRef.current;
 
       if (pendingSelectionRef.current && !pendingSelectionRef.current.started) {
-        if (stateRef.current.advancedMode && advancedToolRef.current === "note") {
+        if (advancedToolRef.current === "note") {
           createAnnotationTextBoxAt(pendingSelectionRef.current.originX, pendingSelectionRef.current.originY);
         } else {
           openCanvasQuickMenuAtPoint(pendingSelectionRef.current.originX, pendingSelectionRef.current.originY);
@@ -2695,13 +2685,6 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setOpenMenu((current) => (current === menu ? null : menu));
   }
 
-  function toggleAdvancedMode() {
-    setState((current) => ({
-      ...current,
-      advancedMode: !current.advancedMode
-    }));
-  }
-
   return (
     <main className="editor-shell">
       <header className="top-toolbar">
@@ -2753,16 +2736,6 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
               </button>
               <button
                 type="button"
-                className={`toolbar-icon-button ${state.advancedMode ? "toolbar-icon-button-active" : ""}`}
-                aria-label="Mode avancé"
-                aria-pressed={state.advancedMode}
-                title={state.advancedMode ? "Mode avancé activé" : "Activer le mode avancé"}
-                onClick={toggleAdvancedMode}
-              >
-                ✦
-              </button>
-              <button
-                type="button"
                 className={`toolbar-icon-button ${openMenu === "export" ? "toolbar-icon-button-active" : ""}`}
                 aria-label="Exporter"
                 title="Exporter"
@@ -2783,26 +2756,24 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
           </div>
 
           <div className="toolbar-row toolbar-row-secondary">
-            {state.advancedMode ? (
-              <div className="toolbar-shortcut-group toolbar-advanced-group" aria-label="Outils avancés">
-                <button
-                  type="button"
-                  className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "note" ? "toolbar-shortcut-active" : ""}`}
-                  title="Petit texte"
-                  onClick={() => setAdvancedTool((current) => (current === "note" ? null : "note"))}
-                >
-                  Aa
-                </button>
-                <button
-                  type="button"
-                  className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "draw" ? "toolbar-shortcut-active" : ""}`}
-                  title="Dessin libre"
-                  onClick={() => setAdvancedTool((current) => (current === "draw" ? null : "draw"))}
-                >
-                  ✎
-                </button>
-              </div>
-            ) : null}
+            <div className="toolbar-shortcut-group toolbar-advanced-group" aria-label="Outils avancés">
+              <button
+                type="button"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "note" ? "toolbar-shortcut-active" : ""}`}
+                title="Petit texte"
+                onClick={() => setAdvancedTool((current) => (current === "note" ? null : "note"))}
+              >
+                Aa
+              </button>
+              <button
+                type="button"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "draw" ? "toolbar-shortcut-active" : ""}`}
+                title="Dessin libre"
+                onClick={() => setAdvancedTool((current) => (current === "draw" ? null : "draw"))}
+              >
+                ✎
+              </button>
+            </div>
 
             <div className="toolbar-shortcut-group toolbar-shortcut-group-symbols" aria-label="Raccourcis maths">
               {activeInlineShortcuts.flatMap((group) => group.items).map((shortcut) => (
@@ -2876,20 +2847,6 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                     onClick={() => setState((current) => ({ ...current, mode: "lycee" }))}
                   >
                     Lycée
-                  </button>
-                </div>
-                <div className="panel-block">
-                  <h2>Mode avancé</h2>
-                  <p className="toolbar-helper">Ajoute les outils `Note` et `Dessin libre` pour annoter la feuille comme sur une copie.</p>
-                </div>
-                <div className="panel-chip-row">
-                  <button
-                    type="button"
-                    className={`chip-button ${state.advancedMode ? "chip-button-active" : ""}`}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={toggleAdvancedMode}
-                  >
-                    {state.advancedMode ? "Avancé activé" : "Activer Avancé"}
                   </button>
                 </div>
               </section>
@@ -3020,7 +2977,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
           </div>
 
           <div
-            className={`document-canvas ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${state.advancedMode && advancedTool === "draw" ? "document-canvas-draw-mode" : ""}`}
+            className={`document-canvas ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" ? "document-canvas-draw-mode" : ""}`}
             ref={canvasRef}
             onDragOver={handleCanvasDragOver}
             onDragLeave={handleCanvasDragLeave}
@@ -3199,11 +3156,11 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
             ))}
 
             <svg
-              className={`canvas-draw-layer ${state.advancedMode && advancedTool === "draw" ? "canvas-draw-layer-active" : ""}`}
+              className={`canvas-draw-layer ${advancedTool === "draw" ? "canvas-draw-layer-active" : ""}`}
               width="100%"
               height="100%"
               onMouseDown={(event) => {
-                if (!(state.advancedMode && advancedTool === "draw")) {
+                if (advancedTool !== "draw") {
                   return;
                 }
 
@@ -3232,7 +3189,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                     }}
                     className={`canvas-draw-stroke-group ${selectedStrokeIds.includes(stroke.id) ? "canvas-draw-stroke-group-selected" : ""}`}
                     onMouseDown={(event) => {
-                      if (state.advancedMode && advancedTool === "draw") {
+                      if (advancedTool === "draw") {
                         return;
                       }
 
