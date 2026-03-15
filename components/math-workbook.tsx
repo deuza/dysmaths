@@ -28,6 +28,8 @@ type FractionBlock = {
   denominator: string;
   simplified: string;
   caption: string;
+  numeratorStrike?: boolean;
+  denominatorStrike?: boolean;
   x: number;
   y: number;
   width: number;
@@ -83,10 +85,21 @@ type FloatingSymbol = {
 type FloatingTextBox = {
   id: string;
   type: "textBox";
+  variant?: "default" | "note";
   text: string;
   x: number;
   y: number;
   width: number;
+};
+
+type FreehandPoint = {
+  x: number;
+  y: number;
+};
+
+type FreehandStroke = {
+  id: string;
+  points: FreehandPoint[];
 };
 
 type MathBlock = FractionBlock | DivisionBlock | PowerBlock | RootBlock;
@@ -94,10 +107,12 @@ type MathBlock = FractionBlock | DivisionBlock | PowerBlock | RootBlock;
 type WriterState = {
   title: string;
   mode: StudyMode;
+  advancedMode: boolean;
   textHtml: string;
   blocks: MathBlock[];
   symbols: FloatingSymbol[];
   textBoxes: FloatingTextBox[];
+  strokes: FreehandStroke[];
 };
 
 type ModalState =
@@ -121,13 +136,14 @@ type InlineShortcutGroup = {
 };
 
 type DragState = {
-  itemType: "block" | "symbol" | "textBox";
+  itemType: "block" | "symbol" | "textBox" | "stroke";
   itemId: string;
   pointerOffsetX: number;
   pointerOffsetY: number;
   groupBlockPositions: Array<{ id: string; x: number; y: number }>;
   groupSymbolPositions: Array<{ id: string; x: number; y: number }>;
   groupTextBoxPositions: Array<{ id: string; x: number; y: number }>;
+  groupStrokePositions: Array<{ id: string; x: number; y: number; points: FreehandPoint[] }>;
   anchorX: number;
   anchorY: number;
 } | null;
@@ -176,6 +192,8 @@ type SnapGuides = {
   y: number | null;
 };
 
+type AdvancedTool = "note" | "draw" | null;
+
 const STORAGE_KEY = "maths-facile-free-layout-v1";
 const FLOATING_TEXTBOX_Y_OFFSET = 10;
 const CANVAS_QUICK_MENU_OFFSET_X = 30;
@@ -194,10 +212,12 @@ const DEFAULT_TEXT_HTML = [
 const DEFAULT_STATE: WriterState = {
   title: "Mon document de maths",
   mode: "college",
+  advancedMode: false,
   textHtml: DEFAULT_TEXT_HTML,
   blocks: [],
   symbols: [],
-  textBoxes: []
+  textBoxes: [],
+  strokes: []
 };
 
 const FONT_SIZE_OPTIONS = [
@@ -275,6 +295,26 @@ function getTextBoxWidth(text: string) {
   return Math.max(36, Math.min(920, visibleText.length * 14 + 12));
 }
 
+function getStrokeBounds(points: FreehandPoint[]) {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return {
+    x: Math.min(...xs),
+    y: Math.min(...ys),
+    width: Math.max(1, Math.max(...xs) - Math.min(...xs)),
+    height: Math.max(1, Math.max(...ys) - Math.min(...ys))
+  };
+}
+
+function createStrokePath(points: FreehandPoint[]) {
+  if (points.length === 0) {
+    return "";
+  }
+
+  const [firstPoint, ...otherPoints] = points;
+  return `M ${firstPoint.x} ${firstPoint.y} ${otherPoints.map((point) => `L ${point.x} ${point.y}`).join(" ")}`;
+}
+
 function cloneWriterState(value: WriterState) {
   return JSON.parse(JSON.stringify(value)) as WriterState;
 }
@@ -305,6 +345,7 @@ function parseStoredState(raw: string): WriterState | null {
     if (
       typeof parsed.title !== "string" ||
       (parsed.mode !== "college" && parsed.mode !== "lycee") ||
+      typeof (parsed as { advancedMode?: unknown }).advancedMode !== "boolean" && typeof (parsed as { advancedMode?: unknown }).advancedMode !== "undefined" ||
       typeof parsed.textHtml !== "string" ||
       !Array.isArray(parsed.blocks)
     ) {
@@ -313,8 +354,18 @@ function parseStoredState(raw: string): WriterState | null {
 
     return {
       ...parsed,
+      advancedMode: typeof (parsed as { advancedMode?: unknown }).advancedMode === "boolean" ? parsed.advancedMode : false,
       symbols: Array.isArray(parsed.symbols) ? parsed.symbols : [],
-      textBoxes: Array.isArray((parsed as { textBoxes?: unknown }).textBoxes) ? (parsed as { textBoxes: FloatingTextBox[] }).textBoxes : []
+      textBoxes: Array.isArray((parsed as { textBoxes?: unknown }).textBoxes) ? (parsed as { textBoxes: FloatingTextBox[] }).textBoxes : [],
+      strokes: Array.isArray((parsed as { strokes?: unknown }).strokes)
+        ? (parsed as { strokes: FreehandStroke[] }).strokes.filter(
+            (stroke) =>
+              Boolean(stroke) &&
+              typeof stroke.id === "string" &&
+              Array.isArray(stroke.points) &&
+              stroke.points.every((point) => point && typeof point.x === "number" && typeof point.y === "number")
+          )
+        : []
     };
   } catch {
     return null;
@@ -471,8 +522,11 @@ export function MathWorkbook() {
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const [selectedSymbolIds, setSelectedSymbolIds] = useState<string[]>([]);
   const [selectedTextBoxIds, setSelectedTextBoxIds] = useState<string[]>([]);
+  const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
   const [editingTextBoxId, setEditingTextBoxId] = useState<string | null>(null);
   const [editingBlock, setEditingBlock] = useState<EditingBlockState>(null);
+  const [advancedTool, setAdvancedTool] = useState<AdvancedTool>(null);
+  const [draftStroke, setDraftStroke] = useState<FreehandPoint[] | null>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuides>({ x: null, y: null });
   const [isHydrated, setIsHydrated] = useState(false);
@@ -488,14 +542,20 @@ export function MathWorkbook() {
   const blocksRef = useRef<MathBlock[]>([]);
   const symbolsRef = useRef<FloatingSymbol[]>([]);
   const textBoxesRef = useRef<FloatingTextBox[]>([]);
+  const strokesRef = useRef<FreehandStroke[]>([]);
   const selectedBlockIdsRef = useRef<string[]>([]);
   const selectedSymbolIdsRef = useRef<string[]>([]);
   const selectedTextBoxIdsRef = useRef<string[]>([]);
+  const selectedStrokeIdsRef = useRef<string[]>([]);
+  const isDrawingStrokeRef = useRef(false);
+  const draftStrokeRef = useRef<FreehandPoint[]>([]);
   const toolbarDragUntilRef = useRef(0);
   const toolbarDragMetaRef = useRef<ToolbarDragMeta | null>(null);
+  const advancedToolRef = useRef<AdvancedTool>(null);
   const blockNodeRefs = useRef<Record<string, HTMLElement | null>>({});
   const symbolNodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const textBoxNodeRefs = useRef<Record<string, HTMLElement | null>>({});
+  const strokeNodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const pendingFocusTextBoxIdRef = useRef<string | null>(null);
   const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | null>>>({});
   const historyInitializedRef = useRef(false);
@@ -519,10 +579,11 @@ export function MathWorkbook() {
     () => STRUCTURED_TOOLS.filter((tool) => tool.modes.includes(state.mode)),
     [state.mode]
   );
-  const selectedBlockId = selectedBlockIds.length === 1 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 ? selectedBlockIds[0] : null;
-  const selectedSymbolId = selectedSymbolIds.length === 1 && selectedBlockIds.length === 0 && selectedTextBoxIds.length === 0 ? selectedSymbolIds[0] : null;
-  const selectedTextBoxId = selectedTextBoxIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 ? selectedTextBoxIds[0] : null;
-  const selectedCount = selectedBlockIds.length + selectedSymbolIds.length + selectedTextBoxIds.length;
+  const selectedBlockId = selectedBlockIds.length === 1 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0 ? selectedBlockIds[0] : null;
+  const selectedSymbolId = selectedSymbolIds.length === 1 && selectedBlockIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0 ? selectedSymbolIds[0] : null;
+  const selectedTextBoxId = selectedTextBoxIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedStrokeIds.length === 0 ? selectedTextBoxIds[0] : null;
+  const selectedStrokeId = selectedStrokeIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 ? selectedStrokeIds[0] : null;
+  const selectedCount = selectedBlockIds.length + selectedSymbolIds.length + selectedTextBoxIds.length + selectedStrokeIds.length;
   const selectedBlock = useMemo(
     () => state.blocks.find((block) => block.id === selectedBlockId) ?? null,
     [selectedBlockId, state.blocks]
@@ -535,6 +596,10 @@ export function MathWorkbook() {
     () => state.textBoxes.find((textBox) => textBox.id === selectedTextBoxId) ?? null,
     [selectedTextBoxId, state.textBoxes]
   );
+  const selectedStroke = useMemo(
+    () => state.strokes.find((stroke) => stroke.id === selectedStrokeId) ?? null,
+    [selectedStrokeId, state.strokes]
+  );
   const multiSelectionMenuPosition = useMemo(() => {
     if (selectedCount <= 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
       return null;
@@ -544,8 +609,9 @@ export function MathWorkbook() {
     const selectedNodes = [
       ...selectedBlockIds.map((id) => blockNodeRefs.current[id]),
       ...selectedSymbolIds.map((id) => symbolNodeRefs.current[id]),
-      ...selectedTextBoxIds.map((id) => textBoxNodeRefs.current[id])
-    ].filter((node): node is HTMLElement => Boolean(node));
+      ...selectedTextBoxIds.map((id) => textBoxNodeRefs.current[id]),
+      ...selectedStrokeIds.map((id) => strokeNodeRefs.current[id])
+    ].filter((node): node is HTMLElement | SVGGElement => Boolean(node));
 
     if (selectedNodes.length === 0) {
       return null;
@@ -561,7 +627,7 @@ export function MathWorkbook() {
       x: centerX,
       y: Math.max(18, minTop - 52)
     };
-  }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.symbols, state.textBoxes]);
+  }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.strokes, state.symbols, state.textBoxes]);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -593,11 +659,22 @@ export function MathWorkbook() {
     blocksRef.current = state.blocks;
     symbolsRef.current = state.symbols;
     textBoxesRef.current = state.textBoxes;
-  }, [state.blocks, state.symbols, state.textBoxes]);
+    strokesRef.current = state.strokes;
+  }, [state.blocks, state.strokes, state.symbols, state.textBoxes]);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    advancedToolRef.current = advancedTool;
+  }, [advancedTool]);
+
+  useEffect(() => {
+    if (!state.advancedMode) {
+      setAdvancedTool(null);
+    }
+  }, [state.advancedMode]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -635,7 +712,8 @@ export function MathWorkbook() {
     selectedBlockIdsRef.current = selectedBlockIds;
     selectedSymbolIdsRef.current = selectedSymbolIds;
     selectedTextBoxIdsRef.current = selectedTextBoxIds;
-  }, [selectedBlockIds, selectedSymbolIds, selectedTextBoxIds]);
+    selectedStrokeIdsRef.current = selectedStrokeIds;
+  }, [selectedBlockIds, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds]);
 
   useEffect(() => {
     if (!pendingFocusTextBoxIdRef.current) {
@@ -677,6 +755,19 @@ export function MathWorkbook() {
 
   useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
+      if (isDrawingStrokeRef.current) {
+        const point = getCanvasPoint(event.clientX, event.clientY);
+        const currentPoints = draftStrokeRef.current;
+        const lastPoint = currentPoints[currentPoints.length - 1];
+
+        if (!lastPoint || Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) >= 1.5) {
+          const nextPoints = [...currentPoints, point];
+          draftStrokeRef.current = nextPoints;
+          setDraftStroke(nextPoints);
+        }
+        return;
+      }
+
       if (!dragRef.current) {
         if (!pendingSelectionRef.current) {
           return;
@@ -720,7 +811,9 @@ export function MathWorkbook() {
           ? blockNodeRefs.current[dragRef.current.itemId]
           : dragRef.current.itemType === "symbol"
             ? symbolNodeRefs.current[dragRef.current.itemId]
-            : textBoxNodeRefs.current[dragRef.current.itemId];
+            : dragRef.current.itemType === "textBox"
+              ? textBoxNodeRefs.current[dragRef.current.itemId]
+              : strokeNodeRefs.current[dragRef.current.itemId];
       const snappedAnchor = getCanvasPlacementPosition(nextAnchorX, nextAnchorY, bounds.width - 24, bounds.height - 24, "soft", {
         height: draggedNode?.getBoundingClientRect().height ?? 0
       });
@@ -768,15 +861,55 @@ export function MathWorkbook() {
             x: Math.max(18, Math.min(bounds.width - 24, dragged.x + deltaX)),
             y: Math.max(18, Math.min(bounds.height - 24, dragged.y + deltaY))
           };
+        }),
+        strokes: current.strokes.map((stroke) => {
+          const dragged = dragRef.current?.groupStrokePositions.find((item) => item.id === stroke.id);
+
+          if (!dragged) {
+            return stroke;
+          }
+
+          return {
+            ...stroke,
+            points: dragged.points.map((point) => ({
+              x: Math.max(18, Math.min(bounds.width - 24, point.x + deltaX)),
+              y: Math.max(18, Math.min(bounds.height - 24, point.y + deltaY))
+            }))
+          };
         })
       }));
     }
 
     function handleMouseUp() {
+      if (isDrawingStrokeRef.current) {
+        const points = draftStrokeRef.current;
+
+        isDrawingStrokeRef.current = false;
+        draftStrokeRef.current = [];
+        setDraftStroke(null);
+        setIsCanvasInteracting(false);
+
+        if (points.length >= 2) {
+          setState((current) => ({
+            ...current,
+            strokes: [...current.strokes, { id: createId("stroke"), points }]
+          }));
+          scheduleTransientHistoryCommit("edit");
+        } else {
+          commitTransientHistorySession("edit");
+        }
+
+        return;
+      }
+
       const draggedSession = dragRef.current;
 
       if (pendingSelectionRef.current && !pendingSelectionRef.current.started) {
-        openCanvasQuickMenuAtPoint(pendingSelectionRef.current.originX, pendingSelectionRef.current.originY);
+        if (stateRef.current.advancedMode && advancedToolRef.current === "note") {
+          createAnnotationTextBoxAt(pendingSelectionRef.current.originX, pendingSelectionRef.current.originY);
+        } else {
+          openCanvasQuickMenuAtPoint(pendingSelectionRef.current.originX, pendingSelectionRef.current.originY);
+        }
       }
 
       if (draggedSession) {
@@ -838,7 +971,7 @@ export function MathWorkbook() {
     };
 
     if (type === "fraction") {
-      return { id: createId("fraction"), type, numerator: "", denominator: "", simplified: "", caption: "", ...position } satisfies MathBlock;
+      return { id: createId("fraction"), type, numerator: "", denominator: "", simplified: "", caption: "", numeratorStrike: false, denominatorStrike: false, ...position } satisfies MathBlock;
     }
 
     if (type === "division") {
@@ -874,14 +1007,15 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   } satisfies FloatingSymbol;
 }
 
-  function createFloatingTextBox(x: number, y: number) {
+  function createFloatingTextBox(x: number, y: number, variant: "default" | "note" = "default") {
     return {
       id: createId("text"),
       type: "textBox",
+      variant,
       text: "",
       x,
       y: Math.max(18, y - FLOATING_TEXTBOX_Y_OFFSET),
-      width: 100
+      width: variant === "note" ? 72 : 100
     } satisfies FloatingTextBox;
   }
 
@@ -951,23 +1085,35 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setSelectedBlockIds([]);
     setSelectedSymbolIds([]);
     setSelectedTextBoxIds([]);
+    setSelectedStrokeIds([]);
   }
 
   function selectSingleBlock(blockId: string) {
     setSelectedBlockIds([blockId]);
     setSelectedSymbolIds([]);
+    setSelectedTextBoxIds([]);
+    setSelectedStrokeIds([]);
   }
 
   function selectSingleSymbol(symbolId: string) {
     setSelectedSymbolIds([symbolId]);
     setSelectedBlockIds([]);
     setSelectedTextBoxIds([]);
+    setSelectedStrokeIds([]);
   }
 
   function selectSingleTextBox(textBoxId: string) {
     setSelectedTextBoxIds([textBoxId]);
     setSelectedBlockIds([]);
     setSelectedSymbolIds([]);
+    setSelectedStrokeIds([]);
+  }
+
+  function selectSingleStroke(strokeId: string) {
+    setSelectedStrokeIds([strokeId]);
+    setSelectedBlockIds([]);
+    setSelectedSymbolIds([]);
+    setSelectedTextBoxIds([]);
   }
 
   function getCanvasPoint(clientX: number, clientY: number) {
@@ -1054,10 +1200,28 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
         return right >= normalized.left && left <= normalized.right && bottom >= normalized.top && top <= normalized.bottom;
       })
       .map((textBox) => textBox.id);
+    const nextStrokeIds = strokesRef.current
+      .filter((stroke) => {
+        const node = strokeNodeRefs.current[stroke.id];
+
+        if (!node) {
+          return false;
+        }
+
+        const bounds = node.getBoundingClientRect();
+        const left = bounds.left - canvasBounds.left;
+        const top = bounds.top - canvasBounds.top;
+        const right = left + bounds.width;
+        const bottom = top + bounds.height;
+
+        return right >= normalized.left && left <= normalized.right && bottom >= normalized.top && top <= normalized.bottom;
+      })
+      .map((stroke) => stroke.id);
 
     setSelectedBlockIds(nextBlockIds);
     setSelectedSymbolIds(nextSymbolIds);
     setSelectedTextBoxIds(nextTextBoxIds);
+    setSelectedStrokeIds(nextStrokeIds);
   }
 
   function beginAreaSelection(clientX: number, clientY: number) {
@@ -1128,6 +1292,32 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     }));
     beginTextBoxEditing(textBox.id);
     setCanvasQuickMenu(null);
+  }
+
+  function createAnnotationTextBoxAt(x: number, y: number) {
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+    const textBox = createFloatingTextBox(snappedPoint.x, snappedPoint.y, "note");
+    beginTransientHistorySession("edit");
+
+    setState((current) => ({
+      ...current,
+      textBoxes: [...current.textBoxes, textBox]
+    }));
+    beginTextBoxEditing(textBox.id);
+  }
+
+  function beginFreehandDrawing(clientX: number, clientY: number) {
+    const point = getCanvasPoint(clientX, clientY);
+    beginTransientHistorySession("edit");
+    isDrawingStrokeRef.current = true;
+    draftStrokeRef.current = [point];
+    setDraftStroke([point]);
+    setCanvasQuickMenu(null);
+    setOpenMenu(null);
+    setIsCanvasInteracting(true);
+    clearFloatingSelection();
   }
 
   function createStructuredToolAt(type: StructuredTool, x: number, y: number) {
@@ -1452,6 +1642,14 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setSelectedTextBoxIds((current) => current.filter((id) => id !== textBoxId));
   }
 
+  function removeStroke(strokeId: string) {
+    setState((current) => ({
+      ...current,
+      strokes: current.strokes.filter((stroke) => stroke.id !== strokeId)
+    }));
+    setSelectedStrokeIds((current) => current.filter((id) => id !== strokeId));
+  }
+
   function removeSelectedItems() {
     if (selectedCount === 0) {
       return;
@@ -1461,7 +1659,8 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       ...current,
       blocks: current.blocks.filter((block) => !selectedBlockIds.includes(block.id)),
       symbols: current.symbols.filter((symbol) => !selectedSymbolIds.includes(symbol.id)),
-      textBoxes: current.textBoxes.filter((textBox) => !selectedTextBoxIds.includes(textBox.id))
+      textBoxes: current.textBoxes.filter((textBox) => !selectedTextBoxIds.includes(textBox.id)),
+      strokes: current.strokes.filter((stroke) => !selectedStrokeIds.includes(stroke.id))
     }));
     clearFloatingSelection();
   }
@@ -1472,6 +1671,9 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setCanvasQuickMenu(null);
     setEditingBlock(null);
     setEditingTextBoxId(null);
+    setDraftStroke(null);
+    isDrawingStrokeRef.current = false;
+    draftStrokeRef.current = [];
     clearFloatingSelection();
   }
 
@@ -1594,6 +1796,22 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
             width: Math.max(24, rect?.width ?? textBox.width),
             height: Math.max(24, rect?.height ?? 32)
           };
+        }),
+      ...state.strokes
+        .filter((stroke) => selectedStrokeIds.includes(stroke.id))
+        .map((stroke) => {
+          const node = strokeNodeRefs.current[stroke.id];
+          const rect = node?.getBoundingClientRect();
+          const strokeBounds = getStrokeBounds(stroke.points);
+
+          return {
+            id: stroke.id,
+            type: "stroke" as const,
+            x: strokeBounds.x,
+            y: strokeBounds.y,
+            width: Math.max(24, rect?.width ?? strokeBounds.width),
+            height: Math.max(24, rect?.height ?? strokeBounds.height)
+          };
         })
     ];
 
@@ -1622,7 +1840,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
 
     let bestLayout:
       | {
-          positions: Array<{ id: string; type: "block" | "symbol" | "textBox"; x: number; y: number }>;
+          positions: Array<{ id: string; type: "block" | "symbol" | "textBox" | "stroke"; x: number; y: number }>;
           score: number;
         }
       | null = null;
@@ -1694,11 +1912,30 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       textBoxes: current.textBoxes.map((textBox) => {
         const nextPosition = positionMap.get(`textBox:${textBox.id}`);
         return nextPosition ? { ...textBox, x: nextPosition.x, y: nextPosition.y } : textBox;
+      }),
+      strokes: current.strokes.map((stroke) => {
+        const nextPosition = positionMap.get(`stroke:${stroke.id}`);
+
+        if (!nextPosition) {
+          return stroke;
+        }
+
+        const currentBounds = getStrokeBounds(stroke.points);
+        const deltaX = nextPosition.x - currentBounds.x;
+        const deltaY = nextPosition.y - currentBounds.y;
+
+        return {
+          ...stroke,
+          points: stroke.points.map((point) => ({
+            x: point.x + deltaX,
+            y: point.y + deltaY
+          }))
+        };
       })
     }));
   }
 
-  function startDragging(itemType: "block" | "symbol" | "textBox", itemId: string, x: number, y: number, event: ReactMouseEvent<HTMLElement>) {
+  function startDragging(itemType: "block" | "symbol" | "textBox" | "stroke", itemId: string, x: number, y: number, event: ReactMouseEvent<Element>) {
     event.preventDefault();
     event.stopPropagation();
     setCanvasQuickMenu(null);
@@ -1718,7 +1955,9 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
         ? selectedBlockIdsRef.current.includes(itemId)
         : itemType === "symbol"
           ? selectedSymbolIdsRef.current.includes(itemId)
-          : selectedTextBoxIdsRef.current.includes(itemId);
+          : itemType === "textBox"
+            ? selectedTextBoxIdsRef.current.includes(itemId)
+            : selectedStrokeIdsRef.current.includes(itemId);
     const currentBlockIds = keepCurrentSelection
       ? selectedBlockIdsRef.current
       : itemType === "block"
@@ -1732,6 +1971,11 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     const currentTextBoxIds = keepCurrentSelection
       ? selectedTextBoxIdsRef.current
       : itemType === "textBox"
+        ? [itemId]
+        : [];
+    const currentStrokeIds = keepCurrentSelection
+      ? selectedStrokeIdsRef.current
+      : itemType === "stroke"
         ? [itemId]
         : [];
 
@@ -1749,6 +1993,12 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       groupTextBoxPositions: textBoxesRef.current
         .filter((textBox) => currentTextBoxIds.includes(textBox.id))
         .map((textBox) => ({ id: textBox.id, x: textBox.x, y: textBox.y })),
+      groupStrokePositions: strokesRef.current
+        .filter((stroke) => currentStrokeIds.includes(stroke.id))
+        .map((stroke) => {
+          const strokeBounds = getStrokeBounds(stroke.points);
+          return { id: stroke.id, x: strokeBounds.x, y: strokeBounds.y, points: stroke.points.map((point) => ({ ...point })) };
+        }),
       anchorX: x,
       anchorY: y
     };
@@ -1758,8 +2008,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
         selectSingleBlock(itemId);
       } else if (itemType === "symbol") {
         selectSingleSymbol(itemId);
-      } else {
+      } else if (itemType === "textBox") {
         selectSingleTextBox(itemId);
+      } else {
+        selectSingleStroke(itemId);
       }
     }
   }
@@ -1896,7 +2148,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     selectSingleSymbol(symbol.id);
   }
 
-  function renderBlockPreviewButton(blockId: string, field: string, content: string, className: string) {
+  function renderBlockPreviewButton(blockId: string, field: string, content: string, className: string, onActivate?: () => void) {
     return (
       <button
         type="button"
@@ -1907,6 +2159,11 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
         }}
         onClick={(event) => {
           event.stopPropagation();
+          if (onActivate) {
+            onActivate();
+            return;
+          }
+
           beginBlockEditing(blockId, field);
         }}
       >
@@ -2274,6 +2531,13 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setOpenMenu((current) => (current === menu ? null : menu));
   }
 
+  function toggleAdvancedMode() {
+    setState((current) => ({
+      ...current,
+      advancedMode: !current.advancedMode
+    }));
+  }
+
   return (
     <main className="editor-shell">
       <header className="top-toolbar">
@@ -2325,6 +2589,16 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
               </button>
               <button
                 type="button"
+                className={`toolbar-icon-button ${state.advancedMode ? "toolbar-icon-button-active" : ""}`}
+                aria-label="Mode avancé"
+                aria-pressed={state.advancedMode}
+                title={state.advancedMode ? "Mode avancé activé" : "Activer le mode avancé"}
+                onClick={toggleAdvancedMode}
+              >
+                ✦
+              </button>
+              <button
+                type="button"
                 className={`toolbar-icon-button ${openMenu === "export" ? "toolbar-icon-button-active" : ""}`}
                 aria-label="Exporter"
                 title="Exporter"
@@ -2345,6 +2619,27 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
           </div>
 
           <div className="toolbar-row toolbar-row-secondary">
+            {state.advancedMode ? (
+              <div className="toolbar-shortcut-group toolbar-advanced-group" aria-label="Outils avancés">
+                <button
+                  type="button"
+                  className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "note" ? "toolbar-shortcut-active" : ""}`}
+                  title="Petit texte"
+                  onClick={() => setAdvancedTool((current) => (current === "note" ? null : "note"))}
+                >
+                  Aa
+                </button>
+                <button
+                  type="button"
+                  className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "draw" ? "toolbar-shortcut-active" : ""}`}
+                  title="Dessin libre"
+                  onClick={() => setAdvancedTool((current) => (current === "draw" ? null : "draw"))}
+                >
+                  ✎
+                </button>
+              </div>
+            ) : null}
+
             <div className="toolbar-shortcut-group toolbar-shortcut-group-symbols" aria-label="Raccourcis maths">
               {activeInlineShortcuts.flatMap((group) => group.items).map((shortcut) => (
                 <button
@@ -2417,6 +2712,20 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                     onClick={() => setState((current) => ({ ...current, mode: "lycee" }))}
                   >
                     Lycée
+                  </button>
+                </div>
+                <div className="panel-block">
+                  <h2>Mode avancé</h2>
+                  <p className="toolbar-helper">Ajoute les outils `Note` et `Dessin libre` pour annoter la feuille comme sur une copie.</p>
+                </div>
+                <div className="panel-chip-row">
+                  <button
+                    type="button"
+                    className={`chip-button ${state.advancedMode ? "chip-button-active" : ""}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={toggleAdvancedMode}
+                  >
+                    {state.advancedMode ? "Avancé activé" : "Activer Avancé"}
                   </button>
                 </div>
               </section>
@@ -2535,10 +2844,19 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 </button>
               </div>
             ) : null}
+
+            {selectedStroke ? (
+              <div className="editor-local-toolbar-group editor-local-toolbar-group-block">
+                <span className="selected-block-label">Trait</span>
+                <button type="button" className="chip-button" onMouseDown={(event) => event.preventDefault()} onClick={() => removeStroke(selectedStroke.id)}>
+                  Supprimer
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div
-            className={`document-canvas ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""}`}
+            className={`document-canvas ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${state.advancedMode && advancedTool === "draw" ? "document-canvas-draw-mode" : ""}`}
             ref={canvasRef}
             onDragOver={handleCanvasDragOver}
             onDragLeave={handleCanvasDragLeave}
@@ -2654,7 +2972,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 ref={(node) => {
                   textBoxNodeRefs.current[textBox.id] = node;
                 }}
-                className={`floating-text-box ${selectedTextBoxIds.includes(textBox.id) ? "floating-text-box-selected" : ""}`}
+                className={`floating-text-box ${textBox.variant === "note" ? "floating-text-box-note" : ""} ${selectedTextBoxIds.includes(textBox.id) ? "floating-text-box-selected" : ""}`}
                 style={{ left: `${textBox.x}px`, top: `${textBox.y}px`, width: `${textBox.width}px` }}
                 onMouseDown={(event) => {
                   if (editingTextBoxId === textBox.id) {
@@ -2684,10 +3002,11 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                     }}
                     onChange={(event) => {
                       const nextText = event.target.value;
+                      const minimumWidth = textBox.variant === "note" ? 56 : 100;
 
                       updateTextBox(textBox.id, {
                         text: nextText,
-                        width: Math.max(100, getTextBoxWidth(nextText))
+                        width: Math.max(minimumWidth, getTextBoxWidth(nextText))
                       });
                     }}
                     onBlur={(event) => {
@@ -2700,7 +3019,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
 
                       updateTextBox(textBox.id, {
                         text: event.currentTarget.value.trim(),
-                        width: getTextBoxWidth(event.currentTarget.value)
+                        width: Math.max(textBox.variant === "note" ? 56 : 36, getTextBoxWidth(event.currentTarget.value))
                       });
                       setEditingTextBoxId(null);
                       clearFloatingSelection();
@@ -2714,6 +3033,56 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 )}
               </article>
             ))}
+
+            <svg
+              className={`canvas-draw-layer ${state.advancedMode && advancedTool === "draw" ? "canvas-draw-layer-active" : ""}`}
+              width="100%"
+              height="100%"
+              onMouseDown={(event) => {
+                if (!(state.advancedMode && advancedTool === "draw")) {
+                  return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                if (editingBlock?.blockId) {
+                  finishBlockEditing(editingBlock.blockId);
+                }
+
+                if (editingTextBoxId) {
+                  closeFloatingTextEditing();
+                }
+
+                beginFreehandDrawing(event.clientX, event.clientY);
+              }}
+            >
+              {state.strokes.map((stroke) => {
+                const strokeBounds = getStrokeBounds(stroke.points);
+
+                return (
+                  <g
+                    key={stroke.id}
+                    ref={(node) => {
+                      strokeNodeRefs.current[stroke.id] = node;
+                    }}
+                    className={`canvas-draw-stroke-group ${selectedStrokeIds.includes(stroke.id) ? "canvas-draw-stroke-group-selected" : ""}`}
+                    onMouseDown={(event) => {
+                      if (state.advancedMode && advancedTool === "draw") {
+                        return;
+                      }
+
+                      startDragging("stroke", stroke.id, strokeBounds.x, strokeBounds.y, event);
+                    }}
+                  >
+                    <path className="canvas-draw-hit" d={createStrokePath(stroke.points)} />
+                    <path className="canvas-draw-path" d={createStrokePath(stroke.points)} />
+                    {selectedStrokeIds.includes(stroke.id) ? <path className="canvas-draw-path canvas-draw-path-selected" d={createStrokePath(stroke.points)} /> : null}
+                  </g>
+                );
+              })}
+              {draftStroke && draftStroke.length >= 2 ? <path className="canvas-draw-path canvas-draw-path-draft" d={createStrokePath(draftStroke)} /> : null}
+            </svg>
 
             {snapGuides.x !== null ? (
               <div className="canvas-snap-guide canvas-snap-guide-vertical" style={{ left: `${snapGuides.x}px` }} aria-hidden="true" />

@@ -142,6 +142,12 @@ button {
   text-align: center;
 }
 
+.toolbar-shortcut-active {
+  background: var(--ink);
+  color: #fffdf9;
+  border-color: transparent;
+}
+
 .toolbar-icon-actions {
   display: flex;
   align-items: center;
@@ -592,6 +598,7 @@ input {
 }
 
 .fraction-line {
+  position: relative;
   padding: 0.1rem 0.6rem;
 }
 
@@ -1204,6 +1211,10 @@ input {
   border: 1px solid rgba(92, 108, 129, 0.14);
 }
 
+.document-canvas-draw-mode {
+  cursor: crosshair;
+}
+
 .document-canvas-drop-active {
   box-shadow:
     inset 0 0 0 3px rgba(217, 119, 69, 0.22),
@@ -1228,6 +1239,56 @@ input {
 .canvas-editor p,
 .canvas-editor div {
   margin: 0 0 0.42rem;
+}
+
+.canvas-draw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-draw-layer-active {
+  pointer-events: auto;
+}
+
+.canvas-draw-stroke-group {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.canvas-draw-stroke-group:active {
+  cursor: grabbing;
+}
+
+.canvas-draw-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 18;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+}
+
+.canvas-draw-path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 90%, #3f2a18);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.canvas-draw-path-draft {
+  opacity: 0.74;
+}
+
+.canvas-draw-path-selected {
+  stroke: rgba(217, 119, 69, 0.8);
+  stroke-width: 5.2;
 }
 
 .floating-math-block {
@@ -1291,6 +1352,11 @@ input {
   cursor: grab;
   font-size: var(--canvas-type-size);
   line-height: 1.4;
+}
+
+.floating-text-box-note {
+  font-size: 0.92rem;
+  line-height: 1.2;
 }
 
 .floating-text-box-selected {
