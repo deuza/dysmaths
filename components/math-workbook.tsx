@@ -1418,7 +1418,7 @@ export function MathWorkbook() {
             height: Math.max(24, rect?.height ?? 32)
           };
         })
-    ].sort((left, right) => (left.y === right.y ? left.x - right.x : left.y - right.y));
+    ];
 
     if (measuredItems.length < 2) {
       return;
@@ -1426,21 +1426,35 @@ export function MathWorkbook() {
 
     const anchorX = Math.min(...measuredItems.map((item) => item.x));
     const anchorY = Math.min(...measuredItems.map((item) => item.y));
+    const currentRight = Math.max(...measuredItems.map((item) => item.x + item.width));
+    const currentBottom = Math.max(...measuredItems.map((item) => item.y + item.height));
+    const currentWidth = Math.max(1, currentRight - anchorX);
+    const currentHeight = Math.max(1, currentBottom - anchorY);
+    const orderedItems = [...measuredItems].sort((left, right) =>
+      currentWidth >= currentHeight
+        ? left.x === right.x
+          ? left.y - right.y
+          : left.x - right.x
+        : left.y === right.y
+          ? left.x - right.x
+          : left.y - right.y
+    );
+    const currentAspectRatio = currentWidth / currentHeight;
     const canvasBounds = canvas.getBoundingClientRect();
 
     let bestLayout:
       | {
           positions: Array<{ id: string; type: "block" | "symbol" | "textBox"; x: number; y: number }>;
-          area: number;
+          score: number;
         }
       | null = null;
 
-    for (let columnCount = 1; columnCount <= measuredItems.length; columnCount += 1) {
-      const { columns, rows } = getGridDimensions(measuredItems.length, columnCount);
+    for (let columnCount = 1; columnCount <= orderedItems.length; columnCount += 1) {
+      const { columns, rows } = getGridDimensions(orderedItems.length, columnCount);
       const colWidths = Array.from({ length: columns }, () => 0);
       const rowHeights = Array.from({ length: rows }, () => 0);
 
-      measuredItems.forEach((item, index) => {
+      orderedItems.forEach((item, index) => {
         const col = index % columns;
         const row = Math.floor(index / columns);
         colWidths[col] = Math.max(colWidths[col], item.width);
@@ -1449,7 +1463,7 @@ export function MathWorkbook() {
 
       const totalWidth = colWidths.reduce((sum, width) => sum + width, 0) + spacing * Math.max(0, columns - 1);
       const totalHeight = rowHeights.reduce((sum, height) => sum + height, 0) + spacing * Math.max(0, rows - 1);
-      const positions = measuredItems.map((item, index) => {
+      const positions = orderedItems.map((item, index) => {
         const col = index % columns;
         const row = Math.floor(index / columns);
         const x = anchorX + colWidths.slice(0, col).reduce((sum, width) => sum + width, 0) + spacing * col;
@@ -1464,9 +1478,16 @@ export function MathWorkbook() {
       });
 
       const area = totalWidth * totalHeight;
+      const nextAspectRatio = totalWidth / Math.max(1, totalHeight);
+      const aspectPenalty = Math.abs(Math.log(nextAspectRatio / currentAspectRatio));
+      const movementPenalty = positions.reduce((sum, position, index) => {
+        const item = orderedItems[index];
+        return sum + Math.hypot(position.x - item.x, position.y - item.y);
+      }, 0);
+      const score = area + area * aspectPenalty * 0.85 + movementPenalty * 18;
 
-      if (!bestLayout || area < bestLayout.area) {
-        bestLayout = { positions, area };
+      if (!bestLayout || score < bestLayout.score) {
+        bestLayout = { positions, score };
       }
     }
 
