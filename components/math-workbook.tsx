@@ -261,7 +261,7 @@ function cmToPx(cm: number) {
 const DEFAULT_TEXT_HTML = "";
 
 const DEFAULT_STATE: WriterState = {
-  title: "Mon document de maths",
+  title: "Mon devoir de maths",
   mode: "college",
   sheetStyle: "seyes",
   activeColor: DEFAULT_ACTIVE_COLOR,
