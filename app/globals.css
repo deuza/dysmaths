@@ -134,6 +134,143 @@ button {
   padding-inline: 0.58rem;
 }
 
+.toolbar-highlight-shell {
+  position: relative;
+}
+
+.toolbar-highlight-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 36px;
+  padding-inline: 0.62rem;
+}
+
+.toolbar-highlight-button-active {
+  background: var(--ink);
+  color: #fffdf9;
+  border-color: transparent;
+}
+
+.toolbar-highlight-marker {
+  position: relative;
+  display: inline-block;
+  width: 1.55rem;
+  height: 1rem;
+}
+
+.toolbar-highlight-marker-tip,
+.toolbar-highlight-marker-body,
+.toolbar-highlight-marker-line {
+  position: absolute;
+  display: block;
+}
+
+.toolbar-highlight-marker-tip {
+  left: 0.18rem;
+  top: 0.18rem;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 0.08rem;
+  background: #1f2d3d;
+  transform: rotate(-24deg);
+}
+
+.toolbar-highlight-marker-body {
+  left: 0.42rem;
+  top: 0.1rem;
+  width: 0.82rem;
+  height: 0.38rem;
+  border-radius: 0.16rem;
+  background: #1f2d3d;
+  transform: rotate(-24deg);
+  transform-origin: left center;
+}
+
+.toolbar-highlight-marker-line {
+  left: 0.72rem;
+  bottom: 0.02rem;
+  width: 0.62rem;
+  height: 0.18rem;
+  border-radius: 999px;
+  background: rgba(255, 226, 92, 0.92);
+}
+
+.toolbar-highlight-caret {
+  font-size: 0.72rem;
+  line-height: 1;
+  opacity: 0.72;
+}
+
+.toolbar-highlight-panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  min-width: 15.5rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(92, 108, 129, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 253, 249, 0.98);
+  box-shadow: 0 16px 36px rgba(31, 45, 61, 0.12);
+}
+
+.toolbar-highlight-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.38rem;
+  min-width: 4.2rem;
+  padding: 0.45rem;
+  border: 1px solid rgba(92, 108, 129, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 253, 249, 0.98);
+  text-align: left;
+}
+
+.toolbar-highlight-swatch-sample {
+  display: block;
+  width: 100%;
+  height: 1.15rem;
+  border-radius: 0.45rem;
+  background: linear-gradient(90deg, rgba(92, 108, 129, 0.08), rgba(92, 108, 129, 0.14));
+}
+
+.toolbar-highlight-swatch-label {
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.toolbar-highlight-swatch-clear .toolbar-highlight-swatch-sample {
+  position: relative;
+  background: rgba(255, 248, 242, 0.96);
+  border: 1px dashed rgba(214, 111, 60, 0.35);
+}
+
+.toolbar-highlight-swatch-clear .toolbar-highlight-swatch-sample::after {
+  content: "";
+  position: absolute;
+  inset: 0.12rem;
+  border-radius: 0.32rem;
+  background: linear-gradient(135deg, transparent 44%, rgba(214, 111, 60, 0.88) 44%, rgba(214, 111, 60, 0.88) 56%, transparent 56%);
+}
+
+.toolbar-highlight-swatch:hover,
+.toolbar-highlight-swatch:focus-visible {
+  border-color: rgba(92, 108, 129, 0.28);
+  transform: translateY(-1px);
+}
+
+.toolbar-highlight-swatch-active {
+  border-color: rgba(31, 45, 61, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(31, 45, 61, 0.08);
+}
+
 .toolbar-row-format .color-chip {
   width: 2.2rem;
   height: 2.2rem;
@@ -631,6 +768,7 @@ input {
   font: inherit;
   line-height: inherit;
   text-align: inherit;
+  text-decoration: inherit;
 }
 
 .fraction-layout,
@@ -1440,7 +1578,8 @@ input {
   font: inherit;
   line-height: 1.4;
   padding: 0 4px;
-  text-align: center;
+  text-align: left;
+  text-decoration: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1451,7 +1590,8 @@ input {
   color: inherit;
   line-height: 1.4;
   padding: 0 4px;
-  text-align: center;
+  text-align: left;
+  text-decoration: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

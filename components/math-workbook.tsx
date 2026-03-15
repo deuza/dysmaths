@@ -20,7 +20,7 @@ import { saveAs } from "file-saver";
 
 type StudyMode = "college" | "lycee";
 type StructuredTool = "fraction" | "division" | "power" | "root";
-type UtilityMenu = "settings" | "export" | null;
+type UtilityMenu = "settings" | "export" | "highlight" | null;
 
 type FractionBlock = {
   id: string;
@@ -33,6 +33,8 @@ type FractionBlock = {
   fontSize: number;
   fontWeight: number;
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
   numeratorStrike?: boolean;
   denominatorStrike?: boolean;
   x: number;
@@ -52,6 +54,8 @@ type DivisionBlock = {
   fontSize: number;
   fontWeight: number;
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
   x: number;
   y: number;
   width: number;
@@ -68,6 +72,8 @@ type PowerBlock = {
   fontSize: number;
   fontWeight: number;
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
   x: number;
   y: number;
   width: number;
@@ -83,6 +89,8 @@ type RootBlock = {
   fontSize: number;
   fontWeight: number;
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
   x: number;
   y: number;
   width: number;
@@ -99,6 +107,8 @@ type FloatingSymbol = {
   fontSize: number;
   fontWeight: number;
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
 };
 
 type FloatingTextBox = {
@@ -110,6 +120,8 @@ type FloatingTextBox = {
   fontSize: number;
   fontWeight: number;
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
   x: number;
   y: number;
   width: number;
@@ -133,6 +145,7 @@ type WriterState = {
   title: string;
   mode: StudyMode;
   activeColor: string;
+  activeHighlightColor: string | null;
   textHtml: string;
   blocks: MathBlock[];
   symbols: FloatingSymbol[];
@@ -239,6 +252,7 @@ const DEFAULT_STATE: WriterState = {
   title: "Mon document de maths",
   mode: "college",
   activeColor: DEFAULT_ACTIVE_COLOR,
+  activeHighlightColor: "rgba(255, 226, 92, 0.58)",
   textHtml: DEFAULT_TEXT_HTML,
   blocks: [],
   symbols: [],
@@ -252,6 +266,14 @@ const COLOR_OPTIONS = [
   { id: "blue", label: "Bleu", value: "#2169b3" },
   { id: "green", label: "Vert", value: "#2f8f57" },
   { id: "pink", label: "Rose", value: "#b54d7a" }
+] as const;
+
+const HIGHLIGHT_OPTIONS = [
+  { id: "none", label: "Aucun", value: "" },
+  { id: "yellow", label: "Jaune", value: "rgba(255, 226, 92, 0.58)" },
+  { id: "green", label: "Vert", value: "rgba(144, 219, 171, 0.52)" },
+  { id: "blue", label: "Bleu", value: "rgba(160, 208, 255, 0.5)" },
+  { id: "pink", label: "Rose", value: "rgba(255, 184, 210, 0.55)" }
 ] as const;
 
 const STRUCTURED_TOOLS = [
@@ -535,12 +557,18 @@ function parseStoredState(raw: string): WriterState | null {
     return {
       ...parsed,
       activeColor: typeof (parsed as { activeColor?: unknown }).activeColor === "string" ? parsed.activeColor : DEFAULT_ACTIVE_COLOR,
+      activeHighlightColor:
+        typeof (parsed as { activeHighlightColor?: unknown }).activeHighlightColor === "string"
+          ? parsed.activeHighlightColor
+          : DEFAULT_STATE.activeHighlightColor,
       blocks: parsed.blocks.map((block) => ({
         ...block,
         color: typeof (block as { color?: unknown }).color === "string" ? (block as { color: string }).color : DEFAULT_ACTIVE_COLOR,
         fontSize: typeof (block as { fontSize?: unknown }).fontSize === "number" ? (block as { fontSize: number }).fontSize : DEFAULT_CANVAS_FONT_SIZE_REM,
         fontWeight: typeof (block as { fontWeight?: unknown }).fontWeight === "number" ? (block as { fontWeight: number }).fontWeight : 500,
-        fontStyle: (block as { fontStyle?: unknown }).fontStyle === "italic" ? "italic" : "normal"
+        fontStyle: (block as { fontStyle?: unknown }).fontStyle === "italic" ? "italic" : "normal",
+        underline: (block as { underline?: unknown }).underline === true,
+        highlightColor: typeof (block as { highlightColor?: unknown }).highlightColor === "string" ? (block as { highlightColor: string }).highlightColor : null
       })),
       symbols: Array.isArray(parsed.symbols)
         ? parsed.symbols.map((symbol) => ({
@@ -548,7 +576,9 @@ function parseStoredState(raw: string): WriterState | null {
             color: typeof symbol.color === "string" ? symbol.color : DEFAULT_ACTIVE_COLOR,
             fontSize: typeof symbol.fontSize === "number" ? symbol.fontSize : DEFAULT_CANVAS_FONT_SIZE_REM,
             fontWeight: typeof (symbol as { fontWeight?: unknown }).fontWeight === "number" ? (symbol as { fontWeight: number }).fontWeight : 500,
-            fontStyle: (symbol as { fontStyle?: unknown }).fontStyle === "italic" ? "italic" : "normal"
+            fontStyle: (symbol as { fontStyle?: unknown }).fontStyle === "italic" ? "italic" : "normal",
+            underline: (symbol as { underline?: unknown }).underline === true,
+            highlightColor: typeof (symbol as { highlightColor?: unknown }).highlightColor === "string" ? (symbol as { highlightColor: string }).highlightColor : null
           }))
         : [],
       textBoxes: Array.isArray((parsed as { textBoxes?: unknown }).textBoxes)
@@ -557,7 +587,9 @@ function parseStoredState(raw: string): WriterState | null {
             color: typeof textBox.color === "string" ? textBox.color : DEFAULT_ACTIVE_COLOR,
             fontSize: typeof textBox.fontSize === "number" ? textBox.fontSize : textBox.variant === "note" ? 0.92 : DEFAULT_CANVAS_FONT_SIZE_REM,
             fontWeight: typeof (textBox as { fontWeight?: unknown }).fontWeight === "number" ? (textBox as { fontWeight: number }).fontWeight : 500,
-            fontStyle: (textBox as { fontStyle?: unknown }).fontStyle === "italic" ? "italic" : "normal"
+            fontStyle: (textBox as { fontStyle?: unknown }).fontStyle === "italic" ? "italic" : "normal",
+            underline: (textBox as { underline?: unknown }).underline === true,
+            highlightColor: typeof (textBox as { highlightColor?: unknown }).highlightColor === "string" ? (textBox as { highlightColor: string }).highlightColor : null
           }))
         : [],
       strokes: Array.isArray((parsed as { strokes?: unknown }).strokes)
@@ -807,6 +839,19 @@ export function MathWorkbook() {
     () => state.strokes.find((stroke) => stroke.id === selectedStrokeId) ?? null,
     [selectedStrokeId, state.strokes]
   );
+  const selectedHighlightColor = useMemo(() => {
+    const selectedItems = [
+      ...state.blocks.filter((block) => selectedBlockIds.includes(block.id)).map((block) => block.highlightColor ?? ""),
+      ...state.symbols.filter((symbol) => selectedSymbolIds.includes(symbol.id)).map((symbol) => symbol.highlightColor ?? ""),
+      ...state.textBoxes.filter((textBox) => selectedTextBoxIds.includes(textBox.id)).map((textBox) => textBox.highlightColor ?? "")
+    ];
+
+    if (selectedItems.length === 0) {
+      return state.activeHighlightColor;
+    }
+
+    return selectedItems.every((value) => value === selectedItems[0]) ? selectedItems[0] || null : state.activeHighlightColor;
+  }, [selectedBlockIds, selectedSymbolIds, selectedTextBoxIds, state.activeHighlightColor, state.blocks, state.symbols, state.textBoxes]);
   const multiSelectionMenuPosition = useMemo(() => {
     if (selectedCount <= 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
       return null;
@@ -1185,6 +1230,8 @@ export function MathWorkbook() {
         fontSize: DEFAULT_CANVAS_FONT_SIZE_REM,
         fontWeight: 500,
         fontStyle: "normal",
+        underline: false,
+        highlightColor: null,
         numeratorStrike: false,
         denominatorStrike: false,
         ...position
@@ -1204,15 +1251,17 @@ export function MathWorkbook() {
         fontSize: DEFAULT_CANVAS_FONT_SIZE_REM,
         fontWeight: 500,
         fontStyle: "normal",
+        underline: false,
+        highlightColor: null,
         ...position
       } satisfies MathBlock;
     }
 
     if (type === "power") {
-      return { id: createId("power"), type, base: "", exponent: "", result: "", caption: "", color: state.activeColor, fontSize: DEFAULT_CANVAS_FONT_SIZE_REM, fontWeight: 500, fontStyle: "normal", ...position } satisfies MathBlock;
+      return { id: createId("power"), type, base: "", exponent: "", result: "", caption: "", color: state.activeColor, fontSize: DEFAULT_CANVAS_FONT_SIZE_REM, fontWeight: 500, fontStyle: "normal", underline: false, highlightColor: null, ...position } satisfies MathBlock;
     }
 
-    return { id: createId("root"), type, radicand: "", result: "", caption: "", color: state.activeColor, fontSize: DEFAULT_CANVAS_FONT_SIZE_REM, fontWeight: 500, fontStyle: "normal", ...position } satisfies MathBlock;
+    return { id: createId("root"), type, radicand: "", result: "", caption: "", color: state.activeColor, fontSize: DEFAULT_CANVAS_FONT_SIZE_REM, fontWeight: 500, fontStyle: "normal", underline: false, highlightColor: null, ...position } satisfies MathBlock;
   }
 
 function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number) {
@@ -1227,7 +1276,9 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       fontSize: DEFAULT_CANVAS_FONT_SIZE_REM
       ,
       fontWeight: 500,
-      fontStyle: "normal"
+      fontStyle: "normal",
+      underline: false,
+      highlightColor: null
   } satisfies FloatingSymbol;
 }
 
@@ -1241,6 +1292,8 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       fontSize: variant === "note" ? 0.92 : DEFAULT_CANVAS_FONT_SIZE_REM,
       fontWeight: 500,
       fontStyle: "normal",
+      underline: false,
+      highlightColor: null,
       x,
       y: Math.max(18, y - FLOATING_TEXTBOX_Y_OFFSET),
       width: variant === "note" ? 72 : 100
@@ -1522,12 +1575,50 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setCanvasQuickMenu(null);
   }
 
-  function createToolbarTextBox() {
+  function getFirstAvailableTextBoxPosition() {
     const canvas = canvasRef.current;
     const bounds = canvas?.getBoundingClientRect();
-    const fallbackX = Math.max(96, Math.round(((bounds?.width ?? 720) * 0.24)));
-    const fallbackY = Math.max(96, Math.round(((bounds?.height ?? 1020) * 0.14)));
-    createTextBoxAt(fallbackX, fallbackY);
+    const canvasWidth = bounds?.width ?? 720;
+    const canvasHeight = bounds?.height ?? 1020;
+    const rem = getRemPixels();
+    const lineStep = PAPER_LINE_STEP_REM * rem;
+    const originX = CANVAS_GRID_LEFT_REM * rem;
+    const originY = CANVAS_GRID_TOP_REM * rem;
+    const targetHeight = 28;
+    const clearance = 12;
+    const occupiedBottoms = [
+      ...state.blocks.map((block) => {
+        const node = blockNodeRefs.current[block.id];
+        const rect = node?.getBoundingClientRect();
+        return block.y + Math.max(targetHeight, rect?.height ?? 52);
+      }),
+      ...state.symbols.map((symbol) => {
+        const node = symbolNodeRefs.current[symbol.id];
+        const rect = node?.getBoundingClientRect();
+        return symbol.y + Math.max(targetHeight, rect?.height ?? symbol.fontSize * 20);
+      }),
+      ...state.textBoxes.map((textBox) => {
+        const node = textBoxNodeRefs.current[textBox.id];
+        const rect = node?.getBoundingClientRect();
+        return textBox.y + Math.max(targetHeight, rect?.height ?? textBox.fontSize * 22);
+      }),
+      ...state.strokes.map((stroke) => {
+        const strokeBounds = getStrokeBounds(stroke.points);
+        return strokeBounds.y + Math.max(targetHeight, strokeBounds.height);
+      })
+    ];
+    const lowestBottom = occupiedBottoms.length > 0 ? Math.max(...occupiedBottoms) : originY;
+    const snappedLine = originY + Math.ceil((Math.max(originY, lowestBottom + clearance) - originY) / lineStep) * lineStep;
+
+    return {
+      x: Math.max(18, Math.min(canvasWidth - 120, Math.round(originX))),
+      y: Math.max(18, Math.min(canvasHeight - 48, Math.round(snappedLine)))
+    };
+  }
+
+  function createToolbarTextBox() {
+    const position = getFirstAvailableTextBoxPosition();
+    createTextBoxAt(position.x, position.y);
   }
 
   function createAnnotationTextBoxAt(x: number, y: number) {
@@ -1861,6 +1952,62 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
         )
       };
     });
+  }
+
+  function toggleCanvasUnderline() {
+    if (selectedCount === 0) {
+      runCommand("underline");
+      return;
+    }
+
+    setState((current) => {
+      const selectedTextItems = [
+        ...current.blocks.filter((block) => selectedBlockIdsRef.current.includes(block.id)),
+        ...current.symbols.filter((symbol) => selectedSymbolIdsRef.current.includes(symbol.id)),
+        ...current.textBoxes.filter((textBox) => selectedTextBoxIdsRef.current.includes(textBox.id))
+      ];
+      const shouldUnderline = !selectedTextItems.every((item) => item.underline);
+
+      return {
+        ...current,
+        blocks: current.blocks.map((block) =>
+          selectedBlockIdsRef.current.includes(block.id) ? { ...block, underline: shouldUnderline } : block
+        ),
+        symbols: current.symbols.map((symbol) =>
+          selectedSymbolIdsRef.current.includes(symbol.id) ? { ...symbol, underline: shouldUnderline } : symbol
+        ),
+        textBoxes: current.textBoxes.map((textBox) =>
+          selectedTextBoxIdsRef.current.includes(textBox.id) ? { ...textBox, underline: shouldUnderline } : textBox
+        )
+      };
+    });
+  }
+
+  function applyCanvasHighlight(highlightColor: string) {
+    const nextHighlight = highlightColor || null;
+
+    if (selectedCount === 0) {
+      setState((current) => ({
+        ...current,
+        activeHighlightColor: nextHighlight
+      }));
+      runCommand("hiliteColor", nextHighlight ?? "transparent");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      activeHighlightColor: nextHighlight,
+      blocks: current.blocks.map((block) =>
+        selectedBlockIdsRef.current.includes(block.id) ? { ...block, highlightColor: nextHighlight } : block
+      ),
+      symbols: current.symbols.map((symbol) =>
+        selectedSymbolIdsRef.current.includes(symbol.id) ? { ...symbol, highlightColor: nextHighlight } : symbol
+      ),
+      textBoxes: current.textBoxes.map((textBox) =>
+        selectedTextBoxIdsRef.current.includes(textBox.id) ? { ...textBox, highlightColor: nextHighlight } : textBox
+      )
+    }));
   }
 
   function adjustCanvasSize(direction: "down" | "up") {
@@ -3029,12 +3176,54 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
               <button type="button" className="chip-button chip-button-compact" aria-label="Italique" title="Italique" onMouseDown={(event) => event.preventDefault()} onClick={toggleCanvasItalic}>
                 I
               </button>
+              <button type="button" className="chip-button chip-button-compact" aria-label="Souligné" title="Souligné" onMouseDown={(event) => event.preventDefault()} onClick={toggleCanvasUnderline}>
+                <span style={{ textDecoration: "underline" }}>U</span>
+              </button>
               <button type="button" className="chip-button chip-button-compact" aria-label="Réduire" title="Réduire" onMouseDown={(event) => event.preventDefault()} onClick={() => adjustCanvasSize("down")}>
                 A-
               </button>
               <button type="button" className="chip-button chip-button-compact" aria-label="Agrandir" title="Agrandir" onMouseDown={(event) => event.preventDefault()} onClick={() => adjustCanvasSize("up")}>
                 A+
               </button>
+              <div className="toolbar-highlight-shell">
+                <button
+                  type="button"
+                  className={`chip-button toolbar-highlight-button ${openMenu === "highlight" ? "toolbar-highlight-button-active" : ""}`}
+                  aria-label="Surligné"
+                  title="Surligné"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => toggleMenu("highlight")}
+                >
+                  <span className="toolbar-highlight-marker" aria-hidden="true">
+                    <span className="toolbar-highlight-marker-tip" />
+                    <span className="toolbar-highlight-marker-body" />
+                    <span className="toolbar-highlight-marker-line" style={{ backgroundColor: selectedHighlightColor ?? "rgba(255, 226, 92, 0.92)" }} />
+                  </span>
+                  <span className="toolbar-highlight-caret" aria-hidden="true">▾</span>
+                </button>
+
+                {openMenu === "highlight" ? (
+                  <div className="toolbar-highlight-panel" role="menu" aria-label="Choisir une couleur de surlignage">
+                    {HIGHLIGHT_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`toolbar-highlight-swatch ${!option.value ? "toolbar-highlight-swatch-clear" : ""} ${(option.value || null) === selectedHighlightColor ? "toolbar-highlight-swatch-active" : ""}`}
+                        aria-label={option.label}
+                        title={option.label}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          applyCanvasHighlight(option.value);
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <span className="toolbar-highlight-swatch-sample" style={option.value ? { backgroundColor: option.value } : undefined} />
+                        <span className="toolbar-highlight-swatch-label">{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="editor-local-toolbar-group">
@@ -3238,7 +3427,16 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                   blockNodeRefs.current[block.id] = node;
                 }}
                 className={`floating-math-block ${selectedBlockIds.includes(block.id) ? "floating-math-block-selected" : ""}`}
-                style={{ left: `${block.x}px`, top: `${block.y}px`, color: block.color, fontSize: `${block.fontSize}rem`, fontWeight: block.fontWeight, fontStyle: block.fontStyle }}
+                style={{
+                  left: `${block.x}px`,
+                  top: `${block.y}px`,
+                  color: block.color,
+                  fontSize: `${block.fontSize}rem`,
+                  fontWeight: block.fontWeight,
+                  fontStyle: block.fontStyle,
+                  textDecoration: block.underline ? "underline" : "none",
+                  backgroundColor: block.highlightColor ?? undefined
+                }}
                 onMouseDown={(event) => {
                   startDragging("block", block.id, block.x, block.y, event);
                 }}
@@ -3263,7 +3461,16 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                   symbolNodeRefs.current[symbol.id] = node;
                 }}
                 className={`floating-math-symbol ${selectedSymbolIds.includes(symbol.id) ? "floating-math-symbol-selected" : ""}`}
-                style={{ left: `${symbol.x}px`, top: `${symbol.y}px`, color: symbol.color, fontSize: `${symbol.fontSize}rem`, fontWeight: symbol.fontWeight, fontStyle: symbol.fontStyle }}
+                style={{
+                  left: `${symbol.x}px`,
+                  top: `${symbol.y}px`,
+                  color: symbol.color,
+                  fontSize: `${symbol.fontSize}rem`,
+                  fontWeight: symbol.fontWeight,
+                  fontStyle: symbol.fontStyle,
+                  textDecoration: symbol.underline ? "underline" : "none",
+                  backgroundColor: symbol.highlightColor ?? undefined
+                }}
                 onMouseDown={(event) => {
                   startDragging("symbol", symbol.id, symbol.x, symbol.y, event);
                 }}
@@ -3279,7 +3486,17 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                   textBoxNodeRefs.current[textBox.id] = node;
                 }}
                 className={`floating-text-box ${textBox.variant === "note" ? "floating-text-box-note" : ""} ${selectedTextBoxIds.includes(textBox.id) ? "floating-text-box-selected" : ""}`}
-                style={{ left: `${textBox.x}px`, top: `${textBox.y}px`, width: `${textBox.width}px`, color: textBox.color, fontSize: `${textBox.fontSize}rem`, fontWeight: textBox.fontWeight, fontStyle: textBox.fontStyle }}
+                style={{
+                  left: `${textBox.x}px`,
+                  top: `${textBox.y}px`,
+                  width: `${textBox.width}px`,
+                  color: textBox.color,
+                  fontSize: `${textBox.fontSize}rem`,
+                  fontWeight: textBox.fontWeight,
+                  fontStyle: textBox.fontStyle,
+                  textDecoration: textBox.underline ? "underline" : "none",
+                  backgroundColor: textBox.highlightColor ?? undefined
+                }}
                 onMouseDown={(event) => {
                   if (editingTextBoxId === textBox.id) {
                     return;
