@@ -718,7 +718,7 @@ input {
   border-radius: 22px;
   background:
     linear-gradient(90deg, transparent 0, transparent 3.3rem, var(--paper-margin) 3.3rem, var(--paper-margin) 3.42rem, transparent 3.42rem),
-    repeating-linear-gradient(180deg, transparent 0, transparent 2.95rem, var(--paper-line) 2.95rem, var(--paper-line) 3.02rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(2.95rem - 0.07rem), var(--paper-line) calc(2.95rem - 0.07rem), var(--paper-line) 2.95rem),
     var(--paper);
   border: 1px solid rgba(92, 108, 129, 0.14);
   font-size: var(--canvas-type-size);
@@ -1089,7 +1089,7 @@ input {
   border-radius: 22px;
   background:
     linear-gradient(90deg, transparent 0, transparent 3.3rem, var(--paper-margin) 3.3rem, var(--paper-margin) 3.42rem, transparent 3.42rem),
-    repeating-linear-gradient(180deg, transparent 0, transparent 2.95rem, var(--paper-line) 2.95rem, var(--paper-line) 3.02rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(2.95rem - 0.07rem), var(--paper-line) calc(2.95rem - 0.07rem), var(--paper-line) 2.95rem),
     var(--paper);
   border: 1px solid rgba(92, 108, 129, 0.14);
   font-size: 1.18rem;
@@ -1410,7 +1410,7 @@ input {
   overflow: hidden;
   background:
     linear-gradient(90deg, transparent 0, transparent 3.3rem, var(--paper-margin) 3.3rem, var(--paper-margin) 3.42rem, transparent 3.42rem),
-    repeating-linear-gradient(180deg, transparent 0, transparent 2.95rem, var(--paper-line) 2.95rem, var(--paper-line) 3.02rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(2.95rem - 0.07rem), var(--paper-line) calc(2.95rem - 0.07rem), var(--paper-line) 2.95rem),
     var(--paper);
   border: 1px solid rgba(92, 108, 129, 0.14);
 }

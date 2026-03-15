@@ -239,8 +239,9 @@ const MAX_HISTORY_STEPS = 80;
 const DEFAULT_CANVAS_FONT_SIZE_REM = 1.18;
 const PAPER_LINE_STEP_REM = 2.95;
 const CANVAS_GRID_LEFT_REM = 4.8;
-const CANVAS_GRID_TOP_REM = 1.25;
+const CANVAS_GRID_TOP_REM = PAPER_LINE_STEP_REM;
 const MAX_SNAP_THRESHOLD_PX = 10;
+const CANVAS_LINE_BASELINE_OFFSET_PX = 5;
 const DEFAULT_ACTIVE_COLOR = "#1f2d3d";
 
 const DEFAULT_TEXT_HTML = "";
@@ -1368,15 +1369,15 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     const clampedX = Math.max(18, Math.min(maxX, Math.round(x)));
     const clampedY = Math.max(18, Math.min(maxY, Math.round(y)));
     const snappedX = originX + Math.round((clampedX - originX) / horizontalStep) * horizontalStep;
-    const centerY = clampedY + visualHeight / 2;
-    const snappedY = originY + Math.round(((visualHeight > 0 ? centerY : clampedY) - originY) / verticalStep) * verticalStep;
+    const anchorY = visualHeight > 0 ? clampedY + visualHeight + CANVAS_LINE_BASELINE_OFFSET_PX : clampedY + CANVAS_LINE_BASELINE_OFFSET_PX;
+    const snappedY = originY + Math.round((anchorY - originY) / verticalStep) * verticalStep;
     const horizontalThreshold = Math.min(MAX_SNAP_THRESHOLD_PX, horizontalStep * 0.26);
     const verticalThreshold = Math.min(MAX_SNAP_THRESHOLD_PX, verticalStep * 0.22);
     const useSnapX = mode === "strict" || Math.abs(clampedX - snappedX) <= horizontalThreshold;
-    const useSnapY = mode === "strict" || Math.abs((visualHeight > 0 ? centerY : clampedY) - snappedY) <= verticalThreshold;
+    const useSnapY = mode === "strict" || Math.abs(anchorY - snappedY) <= verticalThreshold;
     const nextX = useSnapX ? snappedX : clampedX;
     const nextY = useSnapY
-      ? Math.max(18, Math.min(maxY, Math.round((visualHeight > 0 ? snappedY - visualHeight / 2 : snappedY))))
+      ? Math.max(18, Math.min(maxY, Math.round((visualHeight > 0 ? snappedY - visualHeight - CANVAS_LINE_BASELINE_OFFSET_PX : snappedY - CANVAS_LINE_BASELINE_OFFSET_PX))))
       : clampedY;
 
     return {
@@ -1384,7 +1385,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       y: Math.max(18, Math.min(maxY, Math.round(nextY))),
       guides: {
         x: useSnapX ? Math.max(18, Math.min(maxX, Math.round(snappedX))) : null,
-        y: useSnapY ? Math.round(nextY + (visualHeight > 0 ? visualHeight / 2 : 0)) : null
+        y: useSnapY ? Math.round(snappedY) : null
       }
     };
   }
