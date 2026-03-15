@@ -19,6 +19,7 @@ import { Document, ImageRun, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 
 type StudyMode = "college" | "lycee";
+type SheetStyle = "seyes" | "large-grid" | "small-grid" | "blank";
 type StructuredTool = "fraction" | "division" | "power" | "root";
 type UtilityMenu = "settings" | "export" | "highlight" | null;
 
@@ -144,6 +145,7 @@ type MathBlock = FractionBlock | DivisionBlock | PowerBlock | RootBlock;
 type WriterState = {
   title: string;
   mode: StudyMode;
+  sheetStyle: SheetStyle;
   activeColor: string;
   activeHighlightColor: string | null;
   textHtml: string;
@@ -249,6 +251,7 @@ const DEFAULT_TEXT_HTML = "";
 const DEFAULT_STATE: WriterState = {
   title: "Mon document de maths",
   mode: "college",
+  sheetStyle: "seyes",
   activeColor: DEFAULT_ACTIVE_COLOR,
   activeHighlightColor: "rgba(255, 226, 92, 0.58)",
   textHtml: DEFAULT_TEXT_HTML,
@@ -272,6 +275,13 @@ const HIGHLIGHT_OPTIONS = [
   { id: "green", label: "Vert", value: "rgba(144, 219, 171, 0.52)" },
   { id: "blue", label: "Bleu", value: "rgba(160, 208, 255, 0.5)" },
   { id: "pink", label: "Rose", value: "rgba(255, 184, 210, 0.55)" }
+] as const;
+
+const SHEET_STYLE_OPTIONS = [
+  { id: "seyes" as const, label: "Lignes Seyes" },
+  { id: "large-grid" as const, label: "Grands carreaux" },
+  { id: "small-grid" as const, label: "Petits carreaux" },
+  { id: "blank" as const, label: "Feuille blanche" }
 ] as const;
 
 const STRUCTURED_TOOLS = [
@@ -343,6 +353,54 @@ function renderShortcutGlyph(shortcut: Pick<InlineShortcutItem, "id" | "label">)
 function getTextBoxWidth(text: string) {
   const visibleText = text.trim();
   return Math.max(36, Math.min(920, visibleText.length * 14 + 12));
+}
+
+function getSheetMetrics(sheetStyle: SheetStyle, rem: number) {
+  const seyesStep = PAPER_LINE_STEP_REM * rem;
+
+  switch (sheetStyle) {
+    case "large-grid":
+      return {
+        snapXStep: seyesStep,
+        snapYStep: seyesStep,
+        originX: seyesStep,
+        originY: seyesStep,
+        baselineOffset: CANVAS_LINE_BASELINE_OFFSET_PX,
+        snapX: true,
+        snapY: true
+      };
+    case "small-grid":
+      return {
+        snapXStep: seyesStep / 2,
+        snapYStep: seyesStep / 2,
+        originX: seyesStep / 2,
+        originY: seyesStep / 2,
+        baselineOffset: CANVAS_LINE_BASELINE_OFFSET_PX,
+        snapX: true,
+        snapY: true
+      };
+    case "blank":
+      return {
+        snapXStep: seyesStep / 2,
+        snapYStep: seyesStep,
+        originX: CANVAS_GRID_LEFT_REM * rem,
+        originY: seyesStep,
+        baselineOffset: 0,
+        snapX: false,
+        snapY: false
+      };
+    case "seyes":
+    default:
+      return {
+        snapXStep: seyesStep / 2,
+        snapYStep: seyesStep,
+        originX: CANVAS_GRID_LEFT_REM * rem,
+        originY: seyesStep,
+        baselineOffset: CANVAS_LINE_BASELINE_OFFSET_PX,
+        snapX: true,
+        snapY: true
+      };
+  }
 }
 
 function getStrokeBounds(points: FreehandPoint[]) {
@@ -565,6 +623,13 @@ function parseStoredState(raw: string): WriterState | null {
 
     return {
       ...parsed,
+      sheetStyle:
+        (parsed as { sheetStyle?: unknown }).sheetStyle === "large-grid" ||
+        (parsed as { sheetStyle?: unknown }).sheetStyle === "small-grid" ||
+        (parsed as { sheetStyle?: unknown }).sheetStyle === "blank" ||
+        (parsed as { sheetStyle?: unknown }).sheetStyle === "seyes"
+          ? (parsed as { sheetStyle: SheetStyle }).sheetStyle
+          : DEFAULT_STATE.sheetStyle,
       activeColor: typeof (parsed as { activeColor?: unknown }).activeColor === "string" ? parsed.activeColor : DEFAULT_ACTIVE_COLOR,
       activeHighlightColor:
         typeof (parsed as { activeHighlightColor?: unknown }).activeHighlightColor === "string"
@@ -1361,23 +1426,24 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     visualSize?: { height?: number }
   ) {
     const rem = getRemPixels();
-    const horizontalStep = (PAPER_LINE_STEP_REM * rem) / 2;
-    const verticalStep = PAPER_LINE_STEP_REM * rem;
-    const originX = CANVAS_GRID_LEFT_REM * rem;
-    const originY = CANVAS_GRID_TOP_REM * rem;
+    const metrics = getSheetMetrics(stateRef.current.sheetStyle, rem);
+    const horizontalStep = metrics.snapXStep;
+    const verticalStep = metrics.snapYStep;
+    const originX = metrics.originX;
+    const originY = metrics.originY;
     const visualHeight = Math.max(0, visualSize?.height ?? 0);
     const clampedX = Math.max(18, Math.min(maxX, Math.round(x)));
     const clampedY = Math.max(18, Math.min(maxY, Math.round(y)));
     const snappedX = originX + Math.round((clampedX - originX) / horizontalStep) * horizontalStep;
-    const anchorY = visualHeight > 0 ? clampedY + visualHeight + CANVAS_LINE_BASELINE_OFFSET_PX : clampedY + CANVAS_LINE_BASELINE_OFFSET_PX;
+    const anchorY = visualHeight > 0 ? clampedY + visualHeight + metrics.baselineOffset : clampedY + metrics.baselineOffset;
     const snappedY = originY + Math.round((anchorY - originY) / verticalStep) * verticalStep;
     const horizontalThreshold = Math.min(MAX_SNAP_THRESHOLD_PX, horizontalStep * 0.26);
     const verticalThreshold = Math.min(MAX_SNAP_THRESHOLD_PX, verticalStep * 0.22);
-    const useSnapX = mode === "strict" || Math.abs(clampedX - snappedX) <= horizontalThreshold;
-    const useSnapY = mode === "strict" || Math.abs(anchorY - snappedY) <= verticalThreshold;
+    const useSnapX = metrics.snapX && (mode === "strict" || Math.abs(clampedX - snappedX) <= horizontalThreshold);
+    const useSnapY = metrics.snapY && (mode === "strict" || Math.abs(anchorY - snappedY) <= verticalThreshold);
     const nextX = useSnapX ? snappedX : clampedX;
     const nextY = useSnapY
-      ? Math.max(18, Math.min(maxY, Math.round((visualHeight > 0 ? snappedY - visualHeight - CANVAS_LINE_BASELINE_OFFSET_PX : snappedY - CANVAS_LINE_BASELINE_OFFSET_PX))))
+      ? Math.max(18, Math.min(maxY, Math.round((visualHeight > 0 ? snappedY - visualHeight - metrics.baselineOffset : snappedY - metrics.baselineOffset))))
       : clampedY;
 
     return {
@@ -1621,9 +1687,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     const canvasWidth = bounds?.width ?? 720;
     const canvasHeight = bounds?.height ?? 1020;
     const rem = getRemPixels();
-    const lineStep = PAPER_LINE_STEP_REM * rem;
-    const originX = CANVAS_GRID_LEFT_REM * rem;
-    const originY = CANVAS_GRID_TOP_REM * rem;
+    const metrics = getSheetMetrics(state.sheetStyle, rem);
+    const lineStep = metrics.snapYStep;
+    const originX = metrics.originX;
+    const originY = metrics.originY;
     const targetHeight = 28;
     const clearance = 12;
     const occupiedBottoms = [
@@ -1648,8 +1715,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       })
     ];
     const lowestBottom = occupiedBottoms.length > 0 ? Math.max(...occupiedBottoms) : originY;
-    const snappedLine = originY + Math.ceil((Math.max(originY, lowestBottom + clearance) - originY) / lineStep) * lineStep;
-    const snappedTop = snappedLine - targetHeight - CANVAS_LINE_BASELINE_OFFSET_PX;
+    const snappedLine = metrics.snapY
+      ? originY + Math.ceil((Math.max(originY, lowestBottom + clearance) - originY) / lineStep) * lineStep
+      : Math.max(originY, lowestBottom + clearance + targetHeight);
+    const snappedTop = metrics.snapY ? snappedLine - targetHeight - metrics.baselineOffset : snappedLine - targetHeight;
 
     return {
       x: Math.max(18, Math.min(canvasWidth - 120, Math.round(originX))),
@@ -3428,10 +3497,25 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 aria-label="Titre du document"
               />
             </div>
+            <label className="sheet-style-picker">
+              <span>Style de feuille</span>
+              <select
+                className="sheet-style-select"
+                value={state.sheetStyle}
+                onChange={(event) => setState((current) => ({ ...current, sheetStyle: event.target.value as SheetStyle }))}
+                aria-label="Style de feuille"
+              >
+                {SHEET_STYLE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <div
-            className={`document-canvas ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" ? "document-canvas-draw-mode" : ""}`}
+            className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" ? "document-canvas-draw-mode" : ""}`}
             ref={canvasRef}
             onDragOver={handleCanvasDragOver}
             onDragLeave={handleCanvasDragLeave}

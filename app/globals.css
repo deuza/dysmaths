@@ -638,6 +638,25 @@ input {
   color: color-mix(in srgb, var(--ink) 52%, white);
 }
 
+.sheet-style-picker {
+  display: grid;
+  gap: 0.3rem;
+  justify-items: end;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.sheet-style-select {
+  min-height: 2.2rem;
+  padding: 0.38rem 0.75rem;
+  border: 1px solid rgba(92, 108, 129, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 253, 249, 0.96);
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .editor-sheet-note {
   max-width: 34ch;
   margin: 0;
@@ -1408,11 +1427,33 @@ input {
   min-height: 1123px;
   border-radius: 24px;
   overflow: hidden;
+  background: var(--paper);
+  border: 1px solid rgba(92, 108, 129, 0.14);
+}
+
+.document-canvas-seyes {
   background:
     linear-gradient(90deg, transparent 0, transparent 3.3rem, var(--paper-margin) 3.3rem, var(--paper-margin) 3.42rem, transparent 3.42rem),
     repeating-linear-gradient(180deg, transparent 0, transparent calc(2.95rem - 0.07rem), var(--paper-line) calc(2.95rem - 0.07rem), var(--paper-line) 2.95rem),
     var(--paper);
-  border: 1px solid rgba(92, 108, 129, 0.14);
+}
+
+.document-canvas-large-grid {
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(2.95rem - 0.07rem), rgba(187, 209, 235, 0.72) calc(2.95rem - 0.07rem), rgba(187, 209, 235, 0.72) 2.95rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(2.95rem - 0.07rem), rgba(187, 209, 235, 0.72) calc(2.95rem - 0.07rem), rgba(187, 209, 235, 0.72) 2.95rem),
+    var(--paper);
+}
+
+.document-canvas-small-grid {
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(1.475rem - 0.05rem), rgba(187, 209, 235, 0.6) calc(1.475rem - 0.05rem), rgba(187, 209, 235, 0.6) 1.475rem),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(1.475rem - 0.05rem), rgba(187, 209, 235, 0.6) calc(1.475rem - 0.05rem), rgba(187, 209, 235, 0.6) 1.475rem),
+    var(--paper);
+}
+
+.document-canvas-blank {
+  background: var(--paper);
 }
 
 .document-canvas-draw-mode {
