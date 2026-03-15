@@ -1649,16 +1649,25 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     ];
     const lowestBottom = occupiedBottoms.length > 0 ? Math.max(...occupiedBottoms) : originY;
     const snappedLine = originY + Math.ceil((Math.max(originY, lowestBottom + clearance) - originY) / lineStep) * lineStep;
+    const snappedTop = snappedLine - targetHeight - CANVAS_LINE_BASELINE_OFFSET_PX;
 
     return {
       x: Math.max(18, Math.min(canvasWidth - 120, Math.round(originX))),
-      y: Math.max(18, Math.min(canvasHeight - 48, Math.round(snappedLine)))
+      y: Math.max(18, Math.min(canvasHeight - 48, Math.round(snappedTop)))
     };
   }
 
   function createToolbarTextBox() {
     const position = getFirstAvailableTextBoxPosition();
-    createTextBoxAt(position.x, position.y);
+    const textBox = createFloatingTextBox(position.x, position.y + FLOATING_TEXTBOX_Y_OFFSET);
+    beginTransientHistorySession("edit");
+
+    setState((current) => ({
+      ...current,
+      textBoxes: [...current.textBoxes, textBox]
+    }));
+    beginTextBoxEditing(textBox.id);
+    setCanvasQuickMenu(null);
   }
 
   function createAnnotationTextBoxAt(x: number, y: number) {
