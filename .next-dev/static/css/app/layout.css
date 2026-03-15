@@ -1337,6 +1337,25 @@ input {
   pointer-events: none;
 }
 
+.canvas-snap-guide {
+  position: absolute;
+  z-index: 3;
+  background: rgba(216, 34, 34, 0.2);
+  pointer-events: none;
+}
+
+.canvas-snap-guide-vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.canvas-snap-guide-horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
 .canvas-quick-menu {
   position: absolute;
   z-index: 4;

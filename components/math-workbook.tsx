@@ -169,11 +169,20 @@ type CanvasQuickMenu =
     }
   | null;
 
+type SnapGuides = {
+  x: number | null;
+  y: number | null;
+};
+
 const STORAGE_KEY = "maths-facile-free-layout-v1";
 const FLOATING_TEXTBOX_Y_OFFSET = 10;
 const CANVAS_QUICK_MENU_OFFSET_X = 30;
 const MAX_HISTORY_STEPS = 80;
 const DEFAULT_CANVAS_FONT_SIZE_REM = 1.18;
+const PAPER_LINE_STEP_REM = 2.95;
+const CANVAS_GRID_LEFT_REM = 4.8;
+const CANVAS_GRID_TOP_REM = 1.25;
+const MAX_SNAP_THRESHOLD_PX = 10;
 
 const DEFAULT_TEXT_HTML = [
   "<p><strong>Commence ici :</strong> écris librement ta méthode, tes calculs et ta réponse.</p>",
@@ -277,6 +286,14 @@ function getGridDimensions(count: number, columns: number) {
     columns,
     rows: Math.ceil(count / columns)
   };
+}
+
+function getRemPixels() {
+  if (typeof window === "undefined") {
+    return 16;
+  }
+
+  return Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
 }
 
 function parseStoredState(raw: string): WriterState | null {
@@ -400,6 +417,7 @@ export function MathWorkbook() {
   const [editingTextBoxId, setEditingTextBoxId] = useState<string | null>(null);
   const [editingFraction, setEditingFraction] = useState<EditingFractionState>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuides>({ x: null, y: null });
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "word" | null>(null);
   const [isCanvasDropActive, setIsCanvasDropActive] = useState(false);
@@ -640,8 +658,18 @@ export function MathWorkbook() {
       const bounds = canvas.getBoundingClientRect();
       const nextAnchorX = event.clientX - bounds.left - dragRef.current.pointerOffsetX;
       const nextAnchorY = event.clientY - bounds.top - dragRef.current.pointerOffsetY;
-      const deltaX = Math.round(nextAnchorX - dragRef.current.anchorX);
-      const deltaY = Math.round(nextAnchorY - dragRef.current.anchorY);
+      const draggedNode =
+        dragRef.current.itemType === "block"
+          ? blockNodeRefs.current[dragRef.current.itemId]
+          : dragRef.current.itemType === "symbol"
+            ? symbolNodeRefs.current[dragRef.current.itemId]
+            : textBoxNodeRefs.current[dragRef.current.itemId];
+      const snappedAnchor = getCanvasPlacementPosition(nextAnchorX, nextAnchorY, bounds.width - 24, bounds.height - 24, "soft", {
+        height: draggedNode?.getBoundingClientRect().height ?? 0
+      });
+      setSnapGuides(snappedAnchor.guides);
+      const deltaX = Math.round(snappedAnchor.x - dragRef.current.anchorX);
+      const deltaY = Math.round(snappedAnchor.y - dragRef.current.anchorY);
 
       setState((current) => ({
         ...current,
@@ -701,6 +729,7 @@ export function MathWorkbook() {
       dragRef.current = null;
       pendingSelectionRef.current = null;
       setSelectionRect(null);
+      setSnapGuides({ x: null, y: null });
       setIsCanvasInteracting(false);
     }
 
@@ -803,14 +832,49 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     const canvas = canvasRef.current;
 
     if (!canvas) {
-      return { x: 24, y: 24 };
+      return { x: 24, y: 24, guides: { x: null, y: null } };
     }
 
     const bounds = canvas.getBoundingClientRect();
 
+    return getCanvasPlacementPosition(clientX - bounds.left - offsetX, clientY - bounds.top - offsetY, bounds.width - 24, bounds.height - 24, "soft");
+  }
+
+  function getCanvasPlacementPosition(
+    x: number,
+    y: number,
+    maxX: number,
+    maxY: number,
+    mode: "soft" | "strict" = "soft",
+    visualSize?: { height?: number }
+  ) {
+    const rem = getRemPixels();
+    const horizontalStep = (PAPER_LINE_STEP_REM * rem) / 2;
+    const verticalStep = PAPER_LINE_STEP_REM * rem;
+    const originX = CANVAS_GRID_LEFT_REM * rem;
+    const originY = CANVAS_GRID_TOP_REM * rem;
+    const visualHeight = Math.max(0, visualSize?.height ?? 0);
+    const clampedX = Math.max(18, Math.min(maxX, Math.round(x)));
+    const clampedY = Math.max(18, Math.min(maxY, Math.round(y)));
+    const snappedX = originX + Math.round((clampedX - originX) / horizontalStep) * horizontalStep;
+    const centerY = clampedY + visualHeight / 2;
+    const snappedY = originY + Math.round(((visualHeight > 0 ? centerY : clampedY) - originY) / verticalStep) * verticalStep;
+    const horizontalThreshold = Math.min(MAX_SNAP_THRESHOLD_PX, horizontalStep * 0.26);
+    const verticalThreshold = Math.min(MAX_SNAP_THRESHOLD_PX, verticalStep * 0.22);
+    const useSnapX = mode === "strict" || Math.abs(clampedX - snappedX) <= horizontalThreshold;
+    const useSnapY = mode === "strict" || Math.abs((visualHeight > 0 ? centerY : clampedY) - snappedY) <= verticalThreshold;
+    const nextX = useSnapX ? snappedX : clampedX;
+    const nextY = useSnapY
+      ? Math.max(18, Math.min(maxY, Math.round((visualHeight > 0 ? snappedY - visualHeight / 2 : snappedY))))
+      : clampedY;
+
     return {
-      x: Math.max(18, Math.min(bounds.width - 24, Math.round(clientX - bounds.left - offsetX))),
-      y: Math.max(18, Math.min(bounds.height - 24, Math.round(clientY - bounds.top - offsetY)))
+      x: Math.max(18, Math.min(maxX, Math.round(nextX))),
+      y: Math.max(18, Math.min(maxY, Math.round(nextY))),
+      guides: {
+        x: useSnapX ? Math.max(18, Math.min(maxX, Math.round(snappedX))) : null,
+        y: useSnapY ? Math.round(nextY + (visualHeight > 0 ? visualHeight / 2 : 0)) : null
+      }
     };
   }
 
@@ -981,7 +1045,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   }
 
   function createTextBoxAt(x: number, y: number) {
-    const textBox = createFloatingTextBox(x, y);
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+    const textBox = createFloatingTextBox(snappedPoint.x, snappedPoint.y);
     beginTransientHistorySession("edit");
 
     setState((current) => ({
@@ -993,8 +1060,12 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   }
 
   function createStructuredToolAt(type: StructuredTool, x: number, y: number) {
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+
     if (type === "fraction") {
-      const block = { ...createBlock("fraction"), x, y };
+      const block = { ...createBlock("fraction"), x: snappedPoint.x, y: snappedPoint.y };
       beginTransientHistorySession("edit");
 
       setState((current) => ({
@@ -1009,7 +1080,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
 
     setModalState({
       mode: "insert",
-      block: { ...createBlock(type), x, y }
+      block: { ...createBlock(type), x: snappedPoint.x, y: snappedPoint.y }
     });
     setCanvasQuickMenu(null);
   }
@@ -1021,7 +1092,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       return;
     }
 
-    const symbol = createFloatingSymbol(shortcut, x, y);
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+    const symbol = createFloatingSymbol(shortcut, snappedPoint.x, snappedPoint.y);
 
     setState((current) => ({
       ...current,
@@ -1469,6 +1543,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     );
     const currentAspectRatio = currentWidth / currentHeight;
     const canvasBounds = canvas.getBoundingClientRect();
+    const snappedLayoutOrigin = getCanvasPlacementPosition(anchorX, anchorY, canvasBounds.width - 24, canvasBounds.height - 24, "strict");
 
     let bestLayout:
       | {
@@ -1494,15 +1569,18 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       const positions = orderedItems.map((item, index) => {
         const col = index % columns;
         const row = Math.floor(index / columns);
-        const x = anchorX + colWidths.slice(0, col).reduce((sum, width) => sum + width, 0) + spacing * col;
-        const rowTop = anchorY + rowHeights.slice(0, row).reduce((sum, height) => sum + height, 0) + spacing * row;
+        const x = snappedLayoutOrigin.x + colWidths.slice(0, col).reduce((sum, width) => sum + width, 0) + spacing * col;
+        const rowTop = snappedLayoutOrigin.y + rowHeights.slice(0, row).reduce((sum, height) => sum + height, 0) + spacing * row;
         const y = rowTop + (rowHeights[row] - item.height) / 2;
+        const snappedPoint = getCanvasPlacementPosition(x, y, canvasBounds.width - item.width - 18, canvasBounds.height - item.height - 18, "strict", {
+          height: item.height
+        });
 
         return {
           id: item.id,
           type: item.type,
-          x: Math.max(18, Math.min(canvasBounds.width - item.width - 18, x)),
-          y: Math.max(18, Math.min(canvasBounds.height - item.height - 18, y))
+          x: snappedPoint.x,
+          y: snappedPoint.y
         };
       });
 
@@ -1644,6 +1722,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     }
 
     toolbarDragMetaRef.current = null;
+    setSnapGuides({ x: null, y: null });
   }
 
   function shouldIgnoreToolbarClick() {
@@ -1664,6 +1743,13 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
     setIsCanvasDropActive(true);
+    const position = getCanvasDropPosition(
+      event.clientX,
+      event.clientY,
+      toolbarDragMetaRef.current?.offsetX ?? 0,
+      toolbarDragMetaRef.current?.offsetY ?? 0
+    );
+    setSnapGuides(position.guides);
   }
 
   function handleCanvasDragLeave(event: ReactDragEvent<HTMLElement>) {
@@ -1672,6 +1758,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     }
 
     setIsCanvasDropActive(false);
+    setSnapGuides({ x: null, y: null });
   }
 
   function handleCanvasDrop(event: ReactDragEvent<HTMLElement>) {
@@ -1684,6 +1771,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     event.preventDefault();
     event.stopPropagation();
     setIsCanvasDropActive(false);
+    setSnapGuides({ x: null, y: null });
     clearFloatingSelection();
 
     let payload: ToolbarDragPayload | null = null;
@@ -2435,6 +2523,14 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 )}
               </article>
             ))}
+
+            {snapGuides.x !== null ? (
+              <div className="canvas-snap-guide canvas-snap-guide-vertical" style={{ left: `${snapGuides.x}px` }} aria-hidden="true" />
+            ) : null}
+
+            {snapGuides.y !== null ? (
+              <div className="canvas-snap-guide canvas-snap-guide-horizontal" style={{ top: `${snapGuides.y}px` }} aria-hidden="true" />
+            ) : null}
 
             {multiSelectionMenuPosition ? (
               <div
