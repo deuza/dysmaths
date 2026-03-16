@@ -908,6 +908,7 @@ input {
   line-height: inherit;
   text-align: inherit;
   text-decoration: inherit;
+  white-space: inherit;
 }
 
 .fraction-layout,
@@ -969,61 +970,241 @@ input {
   display: grid;
   justify-items: start;
   gap: 0.45rem;
+  --division-cell-size: 1.75rem;
+  --division-cell-gap: 0.3rem;
 }
 
 .division-preview {
-  display: grid;
+  display: inline-grid;
   grid-template-columns: max-content max-content;
-  grid-template-areas:
-    ". quotient"
-    "divisor bracket";
+  grid-template-areas: "left right";
   align-items: start;
-  column-gap: 0.55rem;
-  row-gap: 0.12rem;
+  column-gap: 0;
+  row-gap: 0;
 }
 
 .division-inline-input {
-  min-width: 2.8rem;
+  min-width: 3.1rem;
 }
 
-.division-quotient {
-  grid-area: quotient;
-  justify-self: center;
-  padding: 0 0.1rem 0.18rem 0.65rem;
-  text-align: center;
-  font-family: var(--font-body);
-  font-size: 1em;
+.division-row-button {
+  display: block;
+  width: max-content;
 }
 
-.division-divisor {
-  grid-area: divisor;
-  align-self: center;
-  padding: 0.48rem 0.5rem 0 0;
-  font-family: var(--font-body);
-  font-size: 1em;
-}
-
-.division-bracket {
-  grid-area: bracket;
-  display: grid;
+.division-left-column {
+  grid-area: left;
+  display: inline-grid;
   justify-items: start;
-  gap: 0.16rem;
-  padding: 0.4rem 0.2rem 0 0.68rem;
-  border-top: 3px solid currentColor;
+  align-content: start;
+  row-gap: 0.42rem;
+  padding: 0.08rem 0.54rem 0 0;
+}
+
+.division-right-column {
+  grid-area: right;
+  display: inline-grid;
+  justify-items: start;
+  align-content: start;
+  align-self: stretch;
+  row-gap: 0;
+  padding-left: 0.56rem;
   border-left: 3px solid currentColor;
 }
 
-.division-dividend {
-  font-family: var(--font-body);
-  font-size: 1em;
+.division-work-grid {
+  display: grid;
+  gap: 0.32rem;
 }
 
-.division-remainder {
-  justify-self: end;
-  margin-right: 0.08rem;
-  color: color-mix(in srgb, currentColor 84%, white);
-  font-size: 1em;
-  line-height: 1.1;
+.division-work-line {
+  display: grid;
+  grid-template-columns: 1rem max-content;
+  align-items: center;
+  column-gap: 0.28rem;
+}
+
+.division-work-line-operation .division-workpad,
+.division-work-line-operation .division-cell-row {
+  border-bottom: 4px solid #2f9d4b;
+  padding-bottom: 0.26rem;
+}
+
+.division-work-line-pending {
+  opacity: 0.55;
+}
+
+.division-work-minus {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.division-work-minus-spacer {
+  opacity: 0;
+}
+
+.division-cell-row {
+  display: grid;
+  grid-template-columns: repeat(var(--division-columns), var(--division-cell-size));
+  gap: var(--division-cell-gap);
+}
+
+.division-cell {
+  display: grid;
+  place-items: center;
+  width: var(--division-cell-size);
+  height: var(--division-cell-size);
+  border: 2px solid color-mix(in srgb, currentColor 70%, white);
+  background: color-mix(in srgb, white 94%, currentColor 6%);
+  font-family: "Aptos Mono", "Consolas", "Courier New", monospace;
+  font-size: 0.95em;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.division-cell-input {
+  width: var(--division-cell-size);
+  height: var(--division-cell-size);
+  border: 2px solid color-mix(in srgb, currentColor 70%, white);
+  background: color-mix(in srgb, white 94%, currentColor 6%);
+  color: currentColor;
+  font-family: "Aptos Mono", "Consolas", "Courier New", monospace;
+  font-size: 0.95em;
+  line-height: 1;
+  font-weight: 600;
+  text-align: center;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  caret-color: currentColor;
+}
+
+.division-cell-input:focus {
+  outline: none;
+}
+
+.division-cell-input-active {
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, white);
+}
+
+.division-quotient {
+  justify-self: start;
+  padding: 0.34rem 0.24rem 0 0;
+  border-top: 3px solid currentColor;
+}
+
+.division-quotient-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  justify-self: start;
+  width: calc((var(--division-columns) * var(--division-cell-size)) + ((var(--division-columns) - 1) * var(--division-cell-gap)));
+  height: var(--division-cell-size);
+  padding: 0 0.24rem 0 0;
+  border: none;
+  border-top: 3px solid currentColor;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
+  font-family: "Aptos Mono", "Consolas", "Courier New", monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  letter-spacing: 0;
+  caret-color: currentColor;
+}
+
+.division-quotient-field:focus {
+  outline: none;
+}
+
+.division-quotient-field-active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, currentColor 20%, white);
+}
+
+.division-divisor {
+  align-self: start;
+  padding: 0.1rem 0.24rem 0.22rem 0;
+}
+
+.division-divisor-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  justify-self: start;
+  width: calc((var(--division-columns) * var(--division-cell-size)) + ((var(--division-columns) - 1) * var(--division-cell-gap)));
+  height: var(--division-cell-size);
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
+  font-family: "Aptos Mono", "Consolas", "Courier New", monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  letter-spacing: 0;
+  caret-color: currentColor;
+}
+
+.division-divisor-field:focus {
+  outline: none;
+}
+
+.division-dividend,
+.division-workpad {
+  min-width: 100%;
+}
+
+.division-number-field {
+  position: relative;
+  width: calc((var(--division-columns) * var(--division-cell-size)) + ((var(--division-columns) - 1) * var(--division-cell-gap)));
+}
+
+.division-number-field-display {
+  min-width: 100%;
+  pointer-events: none;
+}
+
+.division-number-field-active .division-cell {
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, white);
+}
+
+.division-dividend-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: calc((var(--division-columns) * var(--division-cell-size)) + ((var(--division-columns) - 1) * var(--division-cell-gap)));
+  height: var(--division-cell-size);
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
+  font-family: "Aptos Mono", "Consolas", "Courier New", monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  letter-spacing: 0;
+  caret-color: currentColor;
+}
+
+.division-dividend-field:focus {
+  outline: none;
+}
+
+.division-workpad-editor {
+  min-width: calc(var(--division-columns) * var(--division-cell-size) + (var(--division-columns) - 1) * var(--division-cell-gap));
+  resize: none;
+  overflow: hidden;
 }
 
 .power-preview {

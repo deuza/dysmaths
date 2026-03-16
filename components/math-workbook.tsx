@@ -8,6 +8,7 @@ import {
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type TouchEvent as ReactTouchEvent,
   useEffect,
   useMemo,
@@ -49,6 +50,7 @@ type DivisionBlock = {
   divisor: string;
   quotient: string;
   remainder: string;
+  work: string;
   caption: string;
   color: string;
   fontSize: number;
@@ -734,6 +736,16 @@ function parseStoredState(raw: string): WriterState | null {
           : defaultState.activeHighlightColor,
       blocks: parsed.blocks.map((block) => ({
         ...block,
+        ...(block.type === "division"
+          ? {
+              work:
+                typeof (block as { work?: unknown }).work === "string"
+                  ? (block as { work: string }).work
+                  : [(block as { dividend?: string }).dividend ?? "", (block as { remainder?: string }).remainder ?? ""]
+                      .filter((line) => typeof line === "string" && line.trim().length > 0)
+                      .join("\n")
+            }
+          : {}),
         color: typeof (block as { color?: unknown }).color === "string" ? (block as { color: string }).color : DEFAULT_ACTIVE_COLOR,
         fontSize: typeof (block as { fontSize?: unknown }).fontSize === "number" ? (block as { fontSize: number }).fontSize : defaultFontSize,
         fontWeight: typeof (block as { fontWeight?: unknown }).fontWeight === "number" ? (block as { fontWeight: number }).fontWeight : 500,
@@ -812,6 +824,96 @@ function getDefaultWidth(type: MathBlock["type"]) {
   }
 }
 
+function getDivisionWorkLines(work: string) {
+  const lines = work.split("\n").map((line) => line.replace(/\s+$/g, ""));
+  return lines.length > 0 ? lines : [""];
+}
+
+function getDivisionQuotientDigits(quotient: string) {
+  const digitsOnly = quotient.replace(/\D+/g, "");
+  return Math.max(1, digitsOnly.length);
+}
+
+function getDivisionMaxWorkLines(quotient: string) {
+  return Math.max(8, getDivisionQuotientDigits(quotient) * 2 + 1);
+}
+
+function getDivisionVisibleWorkLines(work: string, quotient: string) {
+  const rawLines = getDivisionWorkLines(work);
+  const maxLines = getDivisionMaxWorkLines(quotient);
+  let completedPrefix = 0;
+
+  while (completedPrefix < maxLines && (rawLines[completedPrefix] ?? "").trim().length > 0) {
+    completedPrefix += 1;
+  }
+
+  const visibleCount = Math.min(maxLines, Math.max(1, completedPrefix + 1));
+  return Array.from({ length: visibleCount }, (_, index) => rawLines[index] ?? "");
+}
+
+function setDivisionWorkLine(work: string, lineIndex: number, value: string) {
+  const lines = getDivisionWorkLines(work);
+
+  while (lines.length <= lineIndex) {
+    lines.push("");
+  }
+
+  lines[lineIndex] = value;
+
+  while (lines.length > 1 && lines[lines.length - 1].trim().length === 0) {
+    lines.pop();
+  }
+
+  return lines.join("\n");
+}
+
+function getDivisionCellValue(value: string, index: number) {
+  return Array.from(value)[index] ?? "";
+}
+
+function setDivisionCellValue(value: string, index: number, nextCharacter: string) {
+  const characters = Array.from(value);
+
+  while (characters.length <= index) {
+    characters.push("");
+  }
+
+  characters[index] = nextCharacter;
+
+  while (characters.length > 0 && characters[characters.length - 1] === "") {
+    characters.pop();
+  }
+
+  return characters.join("");
+}
+
+function getDivisionLeftColumns(block: DivisionBlock) {
+  const workLines = getDivisionWorkLines(block.work);
+  return Math.max(3, block.dividend.trim().length, ...workLines.map((line) => line.length));
+}
+
+function getDivisionDivisorColumns(block: DivisionBlock) {
+  return Math.max(1, block.divisor.trim().length);
+}
+
+function getDivisionQuotientColumns(block: DivisionBlock) {
+  return Math.max(1, block.quotient.trim().length);
+}
+
+function renderDivisionCellRow(value: string, columns: number, className: string) {
+  const characters = Array.from(value);
+
+  return (
+    <div className={`division-cell-row ${className}`} style={{ ["--division-columns" as string]: columns } as ReactCSSProperties}>
+      {Array.from({ length: columns }).map((_, index) => (
+        <span key={index} className="division-cell">
+          {characters[index] ?? ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function renderMathPreview(block: MathBlock) {
   if (block.type === "fraction") {
     return (
@@ -827,14 +929,33 @@ function renderMathPreview(block: MathBlock) {
   }
 
   if (block.type === "division") {
+    const leftColumns = getDivisionLeftColumns(block);
+    const divisorColumns = getDivisionDivisorColumns(block);
+    const quotientColumns = getDivisionQuotientColumns(block);
+    const workLines = getDivisionVisibleWorkLines(block.work, block.quotient);
     return (
       <div className="math-layout division-layout">
         <div className="division-preview">
-          <div className="division-quotient">{block.quotient || "quotient"}</div>
-          <div className="division-divisor">{block.divisor || "diviseur"}</div>
-          <div className="division-bracket">
-            <div className="division-dividend">{block.dividend || "dividende"}</div>
-            {block.remainder ? <div className="division-remainder">{block.remainder}</div> : null}
+          <div className="division-left-column">
+            <div className="division-work-line division-work-line-head">
+              <span className="division-work-minus division-work-minus-spacer" aria-hidden="true" />
+              {renderDivisionCellRow(block.dividend, leftColumns, "division-dividend")}
+            </div>
+            <div className="division-work-grid">
+              {workLines.map((line, index) => (
+                <div
+                  key={index}
+                  className={`division-work-line ${index % 2 === 0 ? "division-work-line-operation" : "division-work-line-result"} ${line.trim().length === 0 ? "division-work-line-pending" : ""}`}
+                >
+                  {index % 2 === 0 ? <span className="division-work-minus">-</span> : <span className="division-work-minus division-work-minus-spacer" aria-hidden="true" />}
+                  {renderDivisionCellRow(line, leftColumns, "division-workpad")}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="division-right-column">
+            {renderDivisionCellRow(block.divisor, divisorColumns, "division-divisor")}
+            {renderDivisionCellRow(block.quotient, quotientColumns, "division-quotient")}
           </div>
         </div>
         {block.caption ? <p className="math-caption">{block.caption}</p> : null}
@@ -885,7 +1006,7 @@ function getInlineFieldSequence(type: StructuredTool) {
     case "fraction":
       return ["numerator", "denominator"];
     case "division":
-      return ["dividend", "divisor", "quotient", "remainder"];
+      return ["dividend", "divisor", "quotient", "work"];
     case "power":
       return ["base", "exponent"];
     case "root":
@@ -913,7 +1034,7 @@ function isBlockEmpty(block: MathBlock) {
   }
 
   if (block.type === "division") {
-    return !block.dividend.trim() && !block.divisor.trim() && !block.quotient.trim() && !block.remainder.trim();
+    return !block.work.trim() && !block.dividend.trim() && !block.divisor.trim() && !block.quotient.trim() && !block.remainder.trim();
   }
 
   if (block.type === "power") {
@@ -969,7 +1090,7 @@ export function MathWorkbook() {
   const textBoxNodeRefs = useRef<Record<string, HTMLElement | null>>({});
   const strokeNodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const pendingFocusTextBoxIdRef = useRef<string | null>(null);
-  const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | null>>>({});
+  const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | HTMLTextAreaElement | null>>>({});
   const historyInitializedRef = useRef(false);
   const skipHistoryRef = useRef(false);
   const previousStateRef = useRef<WriterState>(cloneWriterState(createDefaultState()));
@@ -1470,6 +1591,7 @@ export function MathWorkbook() {
         divisor: "",
         quotient: "",
         remainder: "",
+        work: "",
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
@@ -2396,7 +2518,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     return !blockNode.contains(target as Node | null);
   }
 
-  function handleInlineBlockKeyDown(blockId: string, field: string, event: ReactKeyboardEvent<HTMLInputElement>) {
+  function handleInlineBlockKeyDown(blockId: string, field: string, event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     const block = blocksRef.current.find((item) => item.id === blockId);
 
     if (!block) {
@@ -2407,12 +2529,49 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       return;
     }
 
+    if (block.type === "division" && field.startsWith("work:")) {
+      const lineIndex = Number.parseInt(field.slice(5), 10);
+      const workLines = getDivisionVisibleWorkLines(block.work, block.quotient);
+      const maxLines = getDivisionMaxWorkLines(block.quotient);
+      const canAdvance = (workLines[lineIndex] ?? "").trim().length > 0 && lineIndex < maxLines - 1;
+
+      if (event.key === "Tab") {
+        event.preventDefault();
+
+        if (event.shiftKey) {
+          if (lineIndex > 0) {
+            setEditingBlock({ blockId, field: `work:${lineIndex - 1}` });
+            return;
+          }
+
+          setEditingBlock({ blockId, field: "quotient" });
+          return;
+        }
+
+        if (lineIndex < workLines.length - 1 || canAdvance) {
+          setEditingBlock({ blockId, field: `work:${lineIndex + 1}` });
+          return;
+        }
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+
+        if (lineIndex < workLines.length - 1 || canAdvance) {
+          setEditingBlock({ blockId, field: `work:${lineIndex + 1}` });
+          return;
+        }
+      }
+
+      return;
+    }
+
     if (event.key === "Tab") {
       event.preventDefault();
       const targetField = event.shiftKey ? getPreviousInlineField(block, field) : getNextInlineField(block, field);
 
       if (targetField) {
-        setEditingBlock({ blockId, field: targetField });
+        setEditingBlock({ blockId, field: block.type === "division" && targetField === "work" ? "work:0" : targetField });
         return;
       }
 
@@ -2424,11 +2583,15 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       return;
     }
 
+    if (block.type === "division" && field === "work") {
+      return;
+    }
+
     event.preventDefault();
     const nextField = getNextInlineField(block, field);
 
     if (nextField) {
-      setEditingBlock({ blockId, field: nextField });
+      setEditingBlock({ blockId, field: block.type === "division" && nextField === "work" ? "work:0" : nextField });
       return;
     }
 
@@ -2971,7 +3134,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     selectSingleSymbol(symbol.id);
   }
 
-  function renderBlockPreviewButton(blockId: string, field: string, content: string, className: string, onActivate?: () => void) {
+  function renderBlockPreviewButton(blockId: string, field: string, content: ReactNode, className: string, onActivate?: () => void) {
     return (
       <button
         type="button"
@@ -3010,14 +3173,33 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     }
 
     if (block.type === "division") {
+      const leftColumns = getDivisionLeftColumns(block);
+      const divisorColumns = getDivisionDivisorColumns(block);
+      const quotientColumns = getDivisionQuotientColumns(block);
+      const workLines = getDivisionVisibleWorkLines(block.work, block.quotient);
       return (
         <div className="math-layout division-layout">
-          <div className="division-preview">
-            {renderBlockPreviewButton(block.id, "quotient", block.quotient || "quotient", "division-quotient")}
-            {renderBlockPreviewButton(block.id, "divisor", block.divisor || "diviseur", "division-divisor")}
-            <div className="division-bracket">
-              {renderBlockPreviewButton(block.id, "dividend", block.dividend || "dividende", "division-dividend")}
-              {renderBlockPreviewButton(block.id, "remainder", block.remainder || "reste", "division-remainder")}
+        <div className="division-preview">
+          <div className="division-left-column">
+              <div className="division-work-line division-work-line-head">
+                <span className="division-work-minus division-work-minus-spacer" aria-hidden="true" />
+                {renderBlockPreviewButton(block.id, "dividend", renderDivisionCellRow(block.dividend, leftColumns, "division-dividend"), "division-row-button")}
+              </div>
+              <div className="division-work-grid">
+                {workLines.map((line, index) => (
+                  <div
+                    key={index}
+                    className={`division-work-line ${index % 2 === 0 ? "division-work-line-operation" : "division-work-line-result"} ${line.trim().length === 0 ? "division-work-line-pending" : ""}`}
+                  >
+                    {index % 2 === 0 ? <span className="division-work-minus">-</span> : <span className="division-work-minus division-work-minus-spacer" aria-hidden="true" />}
+                    {renderBlockPreviewButton(block.id, `work:${index}`, renderDivisionCellRow(line, leftColumns, "division-workpad"), "division-row-button")}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="division-right-column">
+              {renderBlockPreviewButton(block.id, "divisor", renderDivisionCellRow(block.divisor, divisorColumns, "division-divisor"), "division-row-button")}
+              {renderBlockPreviewButton(block.id, "quotient", renderDivisionCellRow(block.quotient, quotientColumns, "division-quotient"), "division-row-button")}
             </div>
           </div>
           {block.caption ? <p className="math-caption">{block.caption}</p> : null}
@@ -3051,18 +3233,18 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   function renderInlineBlockEditor(block: MathBlock) {
     const currentField = editingBlock?.blockId === block.id ? editingBlock.field : null;
     const bindInlineInput = (field: string) => ({
-      ref: (node: HTMLInputElement | null) => {
+      ref: (node: HTMLInputElement | HTMLTextAreaElement | null) => {
         blockInputRefs.current[block.id] = {
           ...blockInputRefs.current[block.id],
           [field]: node
         };
       },
       className: "math-inline-input",
-      onMouseDown: (event: ReactMouseEvent<HTMLInputElement>) => event.stopPropagation(),
+      onMouseDown: (event: ReactMouseEvent<HTMLInputElement | HTMLTextAreaElement>) => event.stopPropagation(),
       onFocus: () => setEditingBlock({ blockId: block.id, field }),
-      onChange: (event: ReactChangeEvent<HTMLInputElement>) => updateInlineBlockField(block.id, field, event.target.value),
-      onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => handleInlineBlockKeyDown(block.id, field, event),
-      onBlur: (event: ReactFocusEvent<HTMLInputElement>) => {
+      onChange: (event: ReactChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => updateInlineBlockField(block.id, field, event.target.value),
+      onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => handleInlineBlockKeyDown(block.id, field, event),
+      onBlur: (event: ReactFocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const nextTarget = event.relatedTarget as Node | null;
 
         if (nextTarget && blockNodeRefs.current[block.id]?.contains(nextTarget)) {
@@ -3092,34 +3274,210 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     }
 
     if (block.type === "division") {
+      const leftColumns = getDivisionLeftColumns(block);
+      const divisorColumns = getDivisionDivisorColumns(block);
+      const quotientColumns = getDivisionQuotientColumns(block);
+      const divisionWorkLines = getDivisionVisibleWorkLines(block.work, block.quotient);
+      const setDivisionCellRef = (field: string, index: number) => (node: HTMLInputElement | null) => {
+        blockInputRefs.current[block.id] = {
+          ...blockInputRefs.current[block.id],
+          [field]: index === 0 ? node : blockInputRefs.current[block.id]?.[field] ?? null,
+          [`${field}:${index}`]: node
+        };
+      };
+      const focusDivisionCell = (field: string, index: number) => {
+        setEditingBlock({ blockId: block.id, field: index === 0 ? field : `${field}:${index}` });
+      };
+      const moveDivisionCellFocus = (field: string, index: number, direction: "next" | "previous", maxColumns: number) => {
+        const nextIndex = direction === "next" ? index + 1 : index - 1;
+
+        if (nextIndex < 0 || nextIndex >= maxColumns) {
+          return false;
+        }
+
+        const nextField = nextIndex === 0 ? field : `${field}:${nextIndex}`;
+        setEditingBlock({ blockId: block.id, field: nextField });
+        return true;
+      };
+      const renderDivisionEditableRow = (
+        field: string,
+        value: string,
+        columns: number,
+        className: string,
+        onUpdate: (nextValue: string) => void
+      ) => (
+        <div className={`division-cell-row ${className}`} style={{ ["--division-columns" as string]: columns } as ReactCSSProperties}>
+          {Array.from({ length: columns }).map((_, index) => {
+            const cellField = index === 0 ? field : `${field}:${index}`;
+            const isActive = currentField === cellField || (index === 0 && currentField === field);
+
+            return (
+              <input
+                key={cellField}
+                ref={setDivisionCellRef(field, index)}
+                value={getDivisionCellValue(value, index)}
+                inputMode="numeric"
+                maxLength={1}
+                className={`division-cell-input ${isActive ? "division-cell-input-active" : ""}`}
+                onMouseDown={(event) => event.stopPropagation()}
+                onFocus={() => focusDivisionCell(field, index)}
+                onChange={(event) => {
+                  const nextCharacter = Array.from(event.target.value).slice(-1).join("");
+                  onUpdate(setDivisionCellValue(value, index, nextCharacter));
+
+                  if (nextCharacter) {
+                    moveDivisionCellFocus(field, index, "next", columns);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    moveDivisionCellFocus(field, index, "previous", columns);
+                    return;
+                  }
+
+                  if (event.key === "ArrowRight") {
+                    event.preventDefault();
+                    moveDivisionCellFocus(field, index, "next", columns);
+                    return;
+                  }
+
+                  if (event.key === "Backspace" && !getDivisionCellValue(value, index)) {
+                    event.preventDefault();
+                    if (moveDivisionCellFocus(field, index, "previous", columns)) {
+                      onUpdate(setDivisionCellValue(value, Math.max(0, index - 1), ""));
+                    }
+                    return;
+                  }
+
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      if (field.startsWith("work:")) {
+                        const lineIndex = Number.parseInt(field.slice(5), 10);
+                        const visibleLines = getDivisionVisibleWorkLines(block.work, block.quotient);
+                        const maxLines = getDivisionMaxWorkLines(block.quotient);
+
+                      if (lineIndex < visibleLines.length - 1 || ((visibleLines[lineIndex] ?? "").trim().length > 0 && lineIndex < maxLines - 1)) {
+                        setEditingBlock({ blockId: block.id, field: `work:${lineIndex + 1}` });
+                      }
+                      return;
+                    }
+
+                    const nextField =
+                      field === "dividend"
+                        ? "divisor"
+                        : field === "divisor"
+                          ? "quotient"
+                          : field === "quotient"
+                            ? "work:0"
+                            : null;
+
+                    if (nextField) {
+                      setEditingBlock({ blockId: block.id, field: nextField });
+                      return;
+                    }
+
+                    finishBlockEditing(block.id);
+                    return;
+                  }
+
+                  if (event.key === "Tab") {
+                    event.preventDefault();
+
+                    if (event.shiftKey && moveDivisionCellFocus(field, index, "previous", columns)) {
+                      return;
+                    }
+
+                    if (!event.shiftKey && moveDivisionCellFocus(field, index, "next", columns)) {
+                      return;
+                    }
+
+                    const nextField =
+                      field === "dividend"
+                        ? event.shiftKey
+                          ? null
+                          : "divisor"
+                        : field === "divisor"
+                          ? event.shiftKey
+                            ? "dividend"
+                            : "quotient"
+                          : field === "quotient"
+                            ? event.shiftKey
+                              ? "divisor"
+                              : "work:0"
+                            : field.startsWith("work:")
+                              ? (() => {
+                                  const lineIndex = Number.parseInt(field.slice(5), 10);
+                                  return event.shiftKey ? (lineIndex > 0 ? `work:${lineIndex - 1}` : "quotient") : `work:${lineIndex + 1}`;
+                                })()
+                              : null;
+
+                    if (nextField) {
+                      setEditingBlock({ blockId: block.id, field: nextField });
+                      return;
+                    }
+
+                    finishBlockEditing(block.id);
+                  }
+                }}
+              />
+            );
+          })}
+        </div>
+      );
+      const renderDivisionNumericField = (
+        field: "dividend" | "divisor" | "quotient",
+        value: string,
+        columns: number,
+        wrapperClassName: string,
+        inputClassName: string,
+        displayClassName: string
+      ) => {
+        const isActive = currentField === field;
+
+        return (
+          <div
+            className={`division-number-field ${wrapperClassName} ${isActive ? "division-number-field-active" : ""}`}
+            style={{ ["--division-columns" as string]: columns } as ReactCSSProperties}
+          >
+            <input
+              {...bindInlineInput(field)}
+              value={value}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              className={inputClassName}
+              onChange={(event) => updateInlineBlockField(block.id, field, event.target.value.replace(/\D+/g, ""))}
+            />
+            {renderDivisionCellRow(value, columns, `${displayClassName} division-number-field-display`)}
+          </div>
+        );
+      };
+
       return (
         <div className="math-layout division-layout">
-          <div className="division-preview">
-            <input
-              {...bindInlineInput("quotient")}
-              value={block.quotient}
-              placeholder="q"
-              className={`math-inline-input division-inline-input division-quotient ${currentField === "quotient" ? "math-inline-input-active" : ""}`}
-            />
-            <input
-              {...bindInlineInput("divisor")}
-              value={block.divisor}
-              placeholder="d"
-              className={`math-inline-input division-inline-input division-divisor ${currentField === "divisor" ? "math-inline-input-active" : ""}`}
-            />
-            <div className="division-bracket">
-              <input
-                {...bindInlineInput("dividend")}
-                value={block.dividend}
-                placeholder="a"
-                className={`math-inline-input division-inline-input division-dividend ${currentField === "dividend" ? "math-inline-input-active" : ""}`}
-              />
-              <input
-                {...bindInlineInput("remainder")}
-                value={block.remainder}
-                placeholder="r"
-                className={`math-inline-input division-inline-input division-remainder ${currentField === "remainder" ? "math-inline-input-active" : ""}`}
-              />
+        <div className="division-preview">
+          <div className="division-left-column">
+              <div className="division-work-line division-work-line-head">
+                <span className="division-work-minus division-work-minus-spacer" aria-hidden="true" />
+                {renderDivisionNumericField("dividend", block.dividend, leftColumns, "division-dividend-field-shell", "division-dividend-field", "division-dividend")}
+              </div>
+              <div className="division-work-grid">
+                {divisionWorkLines.map((line, index) => (
+                  <div
+                    key={index}
+                    className={`division-work-line ${index % 2 === 0 ? "division-work-line-operation" : "division-work-line-result"} ${line.trim().length === 0 ? "division-work-line-pending" : ""}`}
+                  >
+                    {index % 2 === 0 ? <span className="division-work-minus">-</span> : <span className="division-work-minus division-work-minus-spacer" aria-hidden="true" />}
+                    {renderDivisionEditableRow(`work:${index}`, line, leftColumns, "division-workpad", (nextValue) =>
+                      updateInlineBlockField(block.id, "work", setDivisionWorkLine(block.work, index, nextValue))
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="division-right-column">
+              {renderDivisionNumericField("divisor", block.divisor, divisorColumns, "division-divisor-field-shell", "division-divisor-field", "division-divisor")}
+              {renderDivisionNumericField("quotient", block.quotient, quotientColumns, "division-quotient-field-shell", "division-quotient-field", "division-quotient")}
             </div>
           </div>
         </div>
@@ -3365,10 +3723,6 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       return (
         <div className="math-editor-grid">
           <label>
-            <span>Dividende</span>
-            <input value={block.dividend} onChange={(event) => updateModalField("dividend", event.target.value)} placeholder="245" />
-          </label>
-          <label>
             <span>Diviseur</span>
             <input value={block.divisor} onChange={(event) => updateModalField("divisor", event.target.value)} placeholder="7" />
           </label>
@@ -3376,9 +3730,9 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
             <span>Quotient</span>
             <input value={block.quotient} onChange={(event) => updateModalField("quotient", event.target.value)} placeholder="35" />
           </label>
-          <label>
-            <span>Reste</span>
-            <input value={block.remainder} onChange={(event) => updateModalField("remainder", event.target.value)} placeholder="0" />
+          <label className="wide-field">
+            <span>Dividende et calculs</span>
+            <textarea value={block.work} onChange={(event) => updateModalField("work", event.target.value)} placeholder={"245\n21\n35\n0"} rows={4} />
           </label>
           <label className="wide-field">
             <span>Consigne ou remarque</span>
