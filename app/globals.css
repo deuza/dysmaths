@@ -1010,10 +1010,17 @@ input {
 }
 
 .addition-line {
+  position: relative;
+  z-index: 0;
   display: grid;
   grid-template-columns: 1rem max-content;
   align-items: center;
   column-gap: 0.32rem;
+}
+
+.addition-line-carry {
+  z-index: 2;
+  margin-bottom: 0;
 }
 
 .addition-sign {
@@ -1034,6 +1041,77 @@ input {
   min-width: 100%;
 }
 
+.addition-carry-row .division-cell {
+  min-height: calc(var(--division-cell-size) * 0.74);
+  height: calc(var(--division-cell-size) * 0.74);
+  border-color: rgba(31, 45, 61, 0.18);
+  color: rgba(31, 45, 61, 0.68);
+  font-size: 0.84em;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding-top: 0.08rem;
+  padding-left: 0.18rem;
+}
+
+.addition-carry-cell {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding-top: 0.08rem;
+  padding-left: 0.18rem;
+}
+
+.addition-carry-cell-target {
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 69, 0.16);
+}
+
+.addition-carry-cell-editing {
+  position: relative;
+  padding: 0;
+}
+
+.addition-carry-input-ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding-top: 0.08rem;
+  padding-left: 0.18rem;
+  color: currentColor;
+  font-size: 0.84em;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.addition-carry-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0.08rem 0 0 0.18rem;
+  border: none;
+  background: transparent;
+  color: transparent;
+  font: inherit;
+  font-size: 0.84em;
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  caret-color: currentColor;
+  -webkit-text-fill-color: transparent;
+}
+
+.addition-carry-input:focus {
+  outline: none;
+}
+
+.addition-carry-input::selection {
+  background: transparent;
+  color: transparent;
+}
+
 .addition-row-operation {
   border-bottom: 3px solid currentColor;
   padding-bottom: 0.24rem;
@@ -1046,6 +1124,7 @@ input {
 
 .addition-number-field {
   position: relative;
+  z-index: 1;
   width: calc((var(--division-columns) * var(--division-cell-size)) + ((var(--division-columns) - 1) * var(--division-cell-gap)));
 }
 
@@ -1058,6 +1137,31 @@ input {
   border-color: color-mix(in srgb, currentColor 88%, white);
   background: rgba(255, 235, 214, 0.96);
   box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, white);
+}
+
+.addition-number-field-active .addition-carry-row .division-cell,
+.addition-number-field-active.addition-carry-row .division-cell {
+  background: rgba(255, 244, 228, 0.96);
+}
+
+.addition-line-carry-toggle {
+  min-height: calc(var(--division-cell-size) * 0.82);
+  z-index: 3;
+}
+
+.addition-carry-toggle-button {
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+  justify-self: end;
+  padding: 0.08rem 0.42rem;
+  border: 1px dashed rgba(31, 45, 61, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(31, 45, 61, 0.7);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .addition-number-input {

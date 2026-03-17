@@ -20,7 +20,7 @@ import { jsPDF } from "jspdf";
 
 type StudyMode = "college" | "lycee";
 type SheetStyle = "seyes" | "large-grid" | "small-grid" | "blank";
-type StructuredTool = "fraction" | "addition" | "subtraction" | "division" | "power" | "root";
+type StructuredTool = "fraction" | "addition" | "subtraction" | "multiplication" | "division" | "power" | "root";
 type UtilityMenu = "highlight" | null;
 
 type FractionBlock = {
@@ -69,6 +69,9 @@ type AdditionBlock = {
   top: string;
   bottom: string;
   result: string;
+  carryTop: string[];
+  carryBottom: string[];
+  carryResult: string[];
   caption: string;
   color: string;
   fontSize: number;
@@ -87,6 +90,30 @@ type SubtractionBlock = {
   top: string;
   bottom: string;
   result: string;
+  carryTop: string[];
+  carryBottom: string[];
+  carryResult: string[];
+  caption: string;
+  color: string;
+  fontSize: number;
+  fontWeight: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
+  x: number;
+  y: number;
+  width: number;
+};
+
+type MultiplicationBlock = {
+  id: string;
+  type: "multiplication";
+  top: string;
+  bottom: string;
+  result: string;
+  carryTop: string[];
+  carryBottom: string[];
+  carryResult: string[];
   caption: string;
   color: string;
   fontSize: number;
@@ -177,7 +204,7 @@ type FreehandStroke = {
   points: FreehandPoint[];
 };
 
-type MathBlock = FractionBlock | AdditionBlock | SubtractionBlock | DivisionBlock | PowerBlock | RootBlock;
+type MathBlock = FractionBlock | AdditionBlock | SubtractionBlock | MultiplicationBlock | DivisionBlock | PowerBlock | RootBlock;
 
 type WriterState = {
   title: string;
@@ -430,6 +457,7 @@ const STRUCTURED_TOOLS = [
   { id: "fraction" as const, label: "Fraction posée", hint: "Numérateur au-dessus, dénominateur en dessous", modes: ["college", "lycee"] as StudyMode[] },
   { id: "addition" as const, label: "Addition posée", hint: "Deux termes alignés et un résultat", modes: ["college", "lycee"] as StudyMode[] },
   { id: "subtraction" as const, label: "Soustraction posée", hint: "Deux termes alignés et un résultat", modes: ["college", "lycee"] as StudyMode[] },
+  { id: "multiplication" as const, label: "Multiplication posée", hint: "Deux facteurs alignés et un résultat", modes: ["college", "lycee"] as StudyMode[] },
   { id: "division" as const, label: "Division posée", hint: "Diviseur, dividende, quotient et reste", modes: ["college", "lycee"] as StudyMode[] },
   { id: "power" as const, label: "Puissance", hint: "Base, exposant et résultat", modes: ["college", "lycee"] as StudyMode[] },
   { id: "root" as const, label: "Racine", hint: "Radicande et résultat", modes: ["college", "lycee"] as StudyMode[] }
@@ -505,6 +533,10 @@ function renderStructuredToolGlyph(toolId: StructuredTool) {
 
   if (toolId === "subtraction") {
     return "-";
+  }
+
+  if (toolId === "multiplication") {
+    return "×";
   }
 
   if (toolId === "division") {
@@ -820,6 +852,18 @@ function parseStoredState(raw: string): WriterState | null {
                       .join("\n")
             }
           : {}),
+        ...(block.type === "addition" || block.type === "subtraction" || block.type === "multiplication"
+          ? {
+              carryTop:
+                normalizeArithmeticCarryCells(
+                  typeof (block as { carryTop?: unknown }).carryTop !== "undefined"
+                    ? (block as { carryTop?: unknown }).carryTop
+                    : (block as { carry?: unknown }).carry
+                ),
+              carryBottom: normalizeArithmeticCarryCells((block as { carryBottom?: unknown }).carryBottom),
+              carryResult: normalizeArithmeticCarryCells((block as { carryResult?: unknown }).carryResult)
+            }
+          : {}),
         color: typeof (block as { color?: unknown }).color === "string" ? (block as { color: string }).color : DEFAULT_ACTIVE_COLOR,
         fontSize: typeof (block as { fontSize?: unknown }).fontSize === "number" ? (block as { fontSize: number }).fontSize : defaultFontSize,
         fontWeight: typeof (block as { fontWeight?: unknown }).fontWeight === "number" ? (block as { fontWeight: number }).fontWeight : 500,
@@ -876,6 +920,8 @@ function getBlockTitle(block: MathBlock) {
       return "Addition posée";
     case "subtraction":
       return "Soustraction posée";
+    case "multiplication":
+      return "Multiplication posée";
     case "division":
       return "Division posée";
     case "power":
@@ -891,6 +937,7 @@ function getDefaultWidth(type: MathBlock["type"]) {
   switch (type) {
     case "addition":
     case "subtraction":
+    case "multiplication":
       return 250;
     case "division":
       return 320;
@@ -992,16 +1039,91 @@ function getDivisionQuotientColumns(block: DivisionBlock) {
   return Math.max(1, block.quotient.trim().length);
 }
 
-function isColumnArithmeticBlock(block: MathBlock): block is AdditionBlock | SubtractionBlock {
-  return block.type === "addition" || block.type === "subtraction";
+function isColumnArithmeticBlock(block: MathBlock): block is AdditionBlock | SubtractionBlock | MultiplicationBlock {
+  return block.type === "addition" || block.type === "subtraction" || block.type === "multiplication";
 }
 
-function getArithmeticOperator(block: AdditionBlock | SubtractionBlock) {
-  return block.type === "addition" ? "+" : "-";
+function getArithmeticOperator(block: AdditionBlock | SubtractionBlock | MultiplicationBlock) {
+  return block.type === "addition" ? "+" : block.type === "subtraction" ? "-" : "×";
 }
 
-function getAdditionColumns(block: AdditionBlock | SubtractionBlock) {
-  return Math.max(3, block.top.trim().length, block.bottom.trim().length, block.result.trim().length);
+type ArithmeticLineField = "top" | "bottom" | "result";
+type ArithmeticCarryField = "carryTop" | "carryBottom" | "carryResult";
+
+function getCarryFieldForArithmeticLine(field: ArithmeticLineField): ArithmeticCarryField {
+  if (field === "top") {
+    return "carryTop";
+  }
+
+  if (field === "bottom") {
+    return "carryBottom";
+  }
+
+  return "carryResult";
+}
+
+function getArithmeticLineForCarryField(field: ArithmeticCarryField): ArithmeticLineField {
+  if (field === "carryTop") {
+    return "top";
+  }
+
+  if (field === "carryBottom") {
+    return "bottom";
+  }
+
+  return "result";
+}
+
+function normalizeArithmeticCarryCells(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => (typeof item === "string" ? item.slice(-1) : "")).filter((item, index, array) => item !== "" || index < array.length - 1);
+  }
+
+  if (typeof value === "string") {
+    return Array.from(value.replace(/\s+/g, "")).reverse().map((item) => item.slice(-1));
+  }
+
+  return [] as string[];
+}
+
+function hasArithmeticCarryCells(cells: string[]) {
+  return cells.some((cell) => cell.trim().length > 0);
+}
+
+function getArithmeticCarryCells(block: AdditionBlock | SubtractionBlock | MultiplicationBlock, line: ArithmeticLineField) {
+  return block[getCarryFieldForArithmeticLine(line)];
+}
+
+function getArithmeticCarryCell(cells: string[], offsetFromRight: number) {
+  return cells[offsetFromRight] ?? "";
+}
+
+function setArithmeticCarryCell(cells: string[], offsetFromRight: number, nextValue: string) {
+  const nextCells = [...cells];
+
+  while (nextCells.length <= offsetFromRight) {
+    nextCells.push("");
+  }
+
+  nextCells[offsetFromRight] = nextValue.slice(-1);
+
+  while (nextCells.length > 0 && nextCells[nextCells.length - 1] === "") {
+    nextCells.pop();
+  }
+
+  return nextCells;
+}
+
+function getColumnArithmeticColumns(block: AdditionBlock | SubtractionBlock | MultiplicationBlock) {
+  return Math.max(
+    3,
+    block.top.trim().length,
+    block.bottom.trim().length,
+    block.result.trim().length,
+    block.carryTop.length,
+    block.carryBottom.length,
+    block.carryResult.length
+  );
 }
 
 function getAlignedCaretCellIndex(value: string, columns: number, align: "start" | "end", caretPosition: number) {
@@ -1031,21 +1153,59 @@ function renderDivisionCellRow(
   );
 }
 
-function renderColumnArithmeticPreview(block: AdditionBlock | SubtractionBlock) {
-  const columns = getAdditionColumns(block);
+function renderArithmeticCarryRow(
+  cells: string[],
+  columns: number,
+  className: string,
+  targetCellIndex?: number
+) {
+  return (
+    <div className={`division-cell-row ${className}`} style={{ ["--division-columns" as string]: columns } as ReactCSSProperties}>
+      {Array.from({ length: columns }).map((_, index) => {
+        const offsetFromRight = columns - 1 - index;
+        return (
+          <span key={index} className={`division-cell addition-carry-cell ${targetCellIndex === index ? "division-cell-target" : ""}`}>
+            {getArithmeticCarryCell(cells, offsetFromRight)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderColumnArithmeticPreview(block: AdditionBlock | SubtractionBlock | MultiplicationBlock) {
+  const columns = getColumnArithmeticColumns(block);
   const operator = getArithmeticOperator(block);
 
   return (
     <div className="math-layout addition-layout">
       <div className="addition-preview">
+        {hasArithmeticCarryCells(getArithmeticCarryCells(block, "top")) ? (
+          <div className="addition-line addition-line-carry">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            {renderArithmeticCarryRow(getArithmeticCarryCells(block, "top"), columns, "addition-row addition-carry-row")}
+          </div>
+        ) : null}
         <div className="addition-line">
           <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
           {renderDivisionCellRow(block.top, columns, "addition-row", "end")}
         </div>
+        {hasArithmeticCarryCells(getArithmeticCarryCells(block, "bottom")) ? (
+          <div className="addition-line addition-line-carry">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            {renderArithmeticCarryRow(getArithmeticCarryCells(block, "bottom"), columns, "addition-row addition-carry-row")}
+          </div>
+        ) : null}
         <div className="addition-line">
           <span className="addition-sign">{operator}</span>
           {renderDivisionCellRow(block.bottom, columns, "addition-row addition-row-operation", "end")}
         </div>
+        {hasArithmeticCarryCells(getArithmeticCarryCells(block, "result")) ? (
+          <div className="addition-line addition-line-carry">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            {renderArithmeticCarryRow(getArithmeticCarryCells(block, "result"), columns, "addition-row addition-carry-row")}
+          </div>
+        ) : null}
         <div className="addition-line">
           <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
           {renderDivisionCellRow(block.result, columns, "addition-row addition-row-result", "end")}
@@ -1138,6 +1298,7 @@ function getInlineStartField(type: StructuredTool) {
       return "numerator";
     case "addition":
     case "subtraction":
+    case "multiplication":
       return "top";
     case "division":
       return "dividend";
@@ -1156,7 +1317,8 @@ function getInlineFieldSequence(type: StructuredTool) {
       return ["numerator", "denominator"];
     case "addition":
     case "subtraction":
-      return ["top", "bottom", "result"];
+    case "multiplication":
+      return ["carryTop", "top", "carryBottom", "bottom", "carryResult", "result"];
     case "division":
       return ["dividend", "divisor", "quotient", "work"];
     case "power":
@@ -1169,13 +1331,49 @@ function getInlineFieldSequence(type: StructuredTool) {
 }
 
 function getNextInlineField(block: MathBlock, field: string) {
-  const sequence = getInlineFieldSequence(block.type);
+  const sequence = getInlineFieldSequence(block.type).filter((item) => {
+    if (!isColumnArithmeticBlock(block)) {
+      return true;
+    }
+
+    if (item === "carryTop") {
+      return hasArithmeticCarryCells(block.carryTop) || field === "carryTop";
+    }
+
+    if (item === "carryBottom") {
+      return hasArithmeticCarryCells(block.carryBottom) || field === "carryBottom";
+    }
+
+    if (item === "carryResult") {
+      return hasArithmeticCarryCells(block.carryResult) || field === "carryResult";
+    }
+
+    return true;
+  });
   const index = sequence.indexOf(field);
   return index >= 0 && index < sequence.length - 1 ? sequence[index + 1] : null;
 }
 
 function getPreviousInlineField(block: MathBlock, field: string) {
-  const sequence = getInlineFieldSequence(block.type);
+  const sequence = getInlineFieldSequence(block.type).filter((item) => {
+    if (!isColumnArithmeticBlock(block)) {
+      return true;
+    }
+
+    if (item === "carryTop") {
+      return hasArithmeticCarryCells(block.carryTop) || field === "carryTop";
+    }
+
+    if (item === "carryBottom") {
+      return hasArithmeticCarryCells(block.carryBottom) || field === "carryBottom";
+    }
+
+    if (item === "carryResult") {
+      return hasArithmeticCarryCells(block.carryResult) || field === "carryResult";
+    }
+
+    return true;
+  });
   const index = sequence.indexOf(field);
   return index > 0 ? sequence[index - 1] : null;
 }
@@ -1186,11 +1384,15 @@ function isBlockEmpty(block: MathBlock) {
   }
 
   if (block.type === "addition") {
-    return !block.top.trim() && !block.bottom.trim() && !block.result.trim();
+    return !block.top.trim() && !block.bottom.trim() && !block.result.trim() && !hasArithmeticCarryCells(block.carryTop) && !hasArithmeticCarryCells(block.carryBottom) && !hasArithmeticCarryCells(block.carryResult);
   }
 
   if (block.type === "subtraction") {
-    return !block.top.trim() && !block.bottom.trim() && !block.result.trim();
+    return !block.top.trim() && !block.bottom.trim() && !block.result.trim() && !hasArithmeticCarryCells(block.carryTop) && !hasArithmeticCarryCells(block.carryBottom) && !hasArithmeticCarryCells(block.carryResult);
+  }
+
+  if (block.type === "multiplication") {
+    return !block.top.trim() && !block.bottom.trim() && !block.result.trim() && !hasArithmeticCarryCells(block.carryTop) && !hasArithmeticCarryCells(block.carryBottom) && !hasArithmeticCarryCells(block.carryResult);
   }
 
   if (block.type === "division") {
@@ -1780,6 +1982,9 @@ export function MathWorkbook() {
         top: "",
         bottom: "",
         result: "",
+        carryTop: [],
+        carryBottom: [],
+        carryResult: [],
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
@@ -1798,6 +2003,30 @@ export function MathWorkbook() {
         top: "",
         bottom: "",
         result: "",
+        carryTop: [],
+        carryBottom: [],
+        carryResult: [],
+        caption: "",
+        color: state.activeColor,
+        fontSize: defaultFontSize,
+        fontWeight: 500,
+        fontStyle: "normal",
+        underline: false,
+        highlightColor: null,
+        ...position
+      } satisfies MathBlock;
+    }
+
+    if (type === "multiplication") {
+      return {
+        id: createId("multiplication"),
+        type,
+        top: "",
+        bottom: "",
+        result: "",
+        carryTop: [],
+        carryBottom: [],
+        carryResult: [],
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
@@ -2539,7 +2768,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   }
 
   function openInsertModal(type: StructuredTool) {
-    const estimatedHeight = type === "division" ? 92 : type === "addition" ? 84 : type === "fraction" ? 72 : 64;
+    const estimatedHeight = type === "division" ? 92 : type === "addition" || type === "subtraction" || type === "multiplication" ? 98 : type === "fraction" ? 72 : 64;
     const position = getFirstAvailableCanvasObjectPosition(getDefaultWidth(type), estimatedHeight);
     const block = { ...createBlock(type), x: position.x, y: position.y };
     beginTransientHistorySession("edit");
@@ -2563,7 +2792,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     beginBlockEditing(blockId, getInlineStartField(block.type));
   }
 
-  function updateModalField(key: string, value: string) {
+  function updateModalField(key: string, value: string | string[]) {
     setModalState((current) =>
       current
         ? {
@@ -3501,21 +3730,38 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     );
   }
 
-  function renderInteractiveColumnArithmeticPreview(block: AdditionBlock | SubtractionBlock) {
-    const columns = getAdditionColumns(block);
+  function renderInteractiveColumnArithmeticPreview(block: AdditionBlock | SubtractionBlock | MultiplicationBlock) {
+    const columns = getColumnArithmeticColumns(block);
     const operator = getArithmeticOperator(block);
+    const renderCarryPreview = (line: ArithmeticLineField) => {
+      const carryCells = getArithmeticCarryCells(block, line);
+
+      if (hasArithmeticCarryCells(carryCells)) {
+        return (
+          <div className="addition-line addition-line-carry">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            {renderBlockPreviewButton(block.id, getCarryFieldForArithmeticLine(line), renderArithmeticCarryRow(carryCells, columns, "addition-row addition-carry-row"), "addition-row-button")}
+          </div>
+        );
+      }
+
+      return null;
+    };
 
     return (
       <div className="math-layout addition-layout">
         <div className="addition-preview">
+          {renderCarryPreview("top")}
           <div className="addition-line">
             <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
             {renderBlockPreviewButton(block.id, "top", renderDivisionCellRow(block.top, columns, "addition-row", "end"), "addition-row-button")}
           </div>
+          {renderCarryPreview("bottom")}
           <div className="addition-line">
             <span className="addition-sign">{operator}</span>
             {renderBlockPreviewButton(block.id, "bottom", renderDivisionCellRow(block.bottom, columns, "addition-row addition-row-operation", "end"), "addition-row-button")}
           </div>
+          {renderCarryPreview("result")}
           <div className="addition-line">
             <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
             {renderBlockPreviewButton(block.id, "result", renderDivisionCellRow(block.result, columns, "addition-row addition-row-result", "end"), "addition-row-button")}
@@ -3633,11 +3879,18 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       }
     });
 
-    const renderColumnArithmeticInlineEditor = (arithmeticBlock: AdditionBlock | SubtractionBlock) => {
-      const columns = getAdditionColumns(arithmeticBlock);
+    const renderColumnArithmeticInlineEditor = (arithmeticBlock: AdditionBlock | SubtractionBlock | MultiplicationBlock) => {
+      const columns = getColumnArithmeticColumns(arithmeticBlock);
       const operator = getArithmeticOperator(arithmeticBlock);
+      const getCurrentLineTargetIndex = (line: ArithmeticLineField) => {
+        const lineValue = arithmeticBlock[line];
+        const caretKey = `${arithmeticBlock.id}:${line}`;
+        const caretPosition = numericFieldCaretPositions[caretKey] ?? Array.from(lineValue).length;
+        return getAlignedCaretCellIndex(lineValue, columns, "end", caretPosition);
+      };
+      const activeLine = currentField === "top" || currentField?.startsWith("carryTop") ? "top" : currentField === "bottom" || currentField?.startsWith("carryBottom") ? "bottom" : currentField === "result" || currentField?.startsWith("carryResult") ? "result" : null;
       const renderArithmeticNumericField = (
-        field: "top" | "bottom" | "result",
+        field: ArithmeticCarryField | ArithmeticLineField,
         value: string,
         displayClassName: string
       ) => {
@@ -3680,18 +3933,136 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
           </div>
         );
       };
+      const renderCarryControl = (line: ArithmeticLineField) => {
+        const carryField = getCarryFieldForArithmeticLine(line);
+        const carryCells = arithmeticBlock[carryField];
+        const activeCarryMatch = currentField?.match(new RegExp(`^${carryField}:(\\d+)$`));
+        const activeOffset = activeCarryMatch ? Number.parseInt(activeCarryMatch[1] ?? "0", 10) : null;
+        const targetCellIndex = line === activeLine ? getCurrentLineTargetIndex(line) : undefined;
+        const targetOffset = typeof targetCellIndex === "number" ? columns - 1 - targetCellIndex : 0;
+        const showCarryRow = hasArithmeticCarryCells(carryCells) || activeCarryMatch !== null;
+
+        if (showCarryRow) {
+          return (
+            <div className="addition-line addition-line-carry">
+              <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+              <div className="division-cell-row addition-row addition-carry-row" style={{ ["--division-columns" as string]: columns } as ReactCSSProperties}>
+                {Array.from({ length: columns }).map((_, index) => {
+                  const offsetFromRight = columns - 1 - index;
+                  const isActive = activeOffset === offsetFromRight;
+                  const carryCellValue = getArithmeticCarryCell(carryCells, offsetFromRight);
+
+                  if (isActive) {
+                    return (
+                      <span key={index} className="division-cell addition-carry-cell division-cell-target addition-carry-cell-editing">
+                        <span className="addition-carry-input-ghost" aria-hidden="true">
+                          {carryCellValue}
+                        </span>
+                        <input
+                          ref={(node) => {
+                            blockInputRefs.current[arithmeticBlock.id] = {
+                              ...blockInputRefs.current[arithmeticBlock.id],
+                              [`${carryField}:${offsetFromRight}`]: node
+                            };
+                          }}
+                          value={carryCellValue}
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={1}
+                          className="addition-carry-input"
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onFocus={() => setEditingBlock({ blockId: arithmeticBlock.id, field: `${carryField}:${offsetFromRight}` })}
+                          onBlur={(event) => {
+                            const nextTarget = event.relatedTarget as Node | null;
+
+                            if (nextTarget && blockNodeRefs.current[arithmeticBlock.id]?.contains(nextTarget)) {
+                              return;
+                            }
+
+                            setTimeout(() => {
+                              if (editingBlock?.field === `${carryField}:${offsetFromRight}`) {
+                                finishBlockEditing(arithmeticBlock.id);
+                              }
+                            }, 0);
+                          }}
+                          onChange={(event) => {
+                            const nextValue = event.target.value.replace(/\D+/g, "").slice(-1);
+                            setState((current) => ({
+                              ...current,
+                              blocks: current.blocks.map((block) =>
+                                block.id === arithmeticBlock.id && isColumnArithmeticBlock(block)
+                                  ? ({ ...block, [carryField]: setArithmeticCarryCell(block[carryField], offsetFromRight, nextValue) } as MathBlock)
+                                  : block
+                              )
+                            }));
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Tab" || event.key === "Enter") {
+                              event.preventDefault();
+                              setEditingBlock({ blockId: arithmeticBlock.id, field: line });
+                            }
+                          }}
+                        />
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      className={`division-cell addition-carry-cell ${typeof targetCellIndex === "number" && targetCellIndex === index ? "addition-carry-cell-target" : ""}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={() => setEditingBlock({ blockId: arithmeticBlock.id, field: `${carryField}:${offsetFromRight}` })}
+                    >
+                      {carryCellValue}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+
+        if (currentField !== line || typeof targetCellIndex !== "number") {
+          return null;
+        }
+
+        return (
+          <div className="addition-line addition-line-carry addition-line-carry-toggle">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            <button
+              type="button"
+              className="addition-carry-toggle-button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={() => setEditingBlock({ blockId: arithmeticBlock.id, field: `${carryField}:${targetOffset}` })}
+            >
+              + retenue
+            </button>
+          </div>
+        );
+      };
 
       return (
         <div className="math-layout addition-layout">
           <div className="addition-preview">
+            {renderCarryControl("top")}
             <div className="addition-line">
               <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
               {renderArithmeticNumericField("top", arithmeticBlock.top, "addition-row")}
             </div>
+            {renderCarryControl("bottom")}
             <div className="addition-line">
               <span className="addition-sign">{operator}</span>
               {renderArithmeticNumericField("bottom", arithmeticBlock.bottom, "addition-row addition-row-operation")}
             </div>
+            {renderCarryControl("result")}
             <div className="addition-line">
               <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
               {renderArithmeticNumericField("result", arithmeticBlock.result, "addition-row addition-row-result")}
@@ -4207,7 +4578,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       );
     }
 
-    if (block.type === "addition" || block.type === "subtraction") {
+    if (block.type === "addition" || block.type === "subtraction" || block.type === "multiplication") {
       return (
         <div className="math-editor-grid">
           <label>
@@ -4222,9 +4593,21 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
             <span>Résultat</span>
             <input value={block.result} onChange={(event) => updateModalField("result", event.target.value)} placeholder="282" />
           </label>
+          <label>
+            <span>Retenue haut</span>
+            <input value={[...block.carryTop].reverse().join("")} onChange={(event) => updateModalField("carryTop", normalizeArithmeticCarryCells(event.target.value))} placeholder="1" />
+          </label>
+          <label>
+            <span>Retenue milieu</span>
+            <input value={[...block.carryBottom].reverse().join("")} onChange={(event) => updateModalField("carryBottom", normalizeArithmeticCarryCells(event.target.value))} placeholder="2" />
+          </label>
+          <label>
+            <span>Retenue bas</span>
+            <input value={[...block.carryResult].reverse().join("")} onChange={(event) => updateModalField("carryResult", normalizeArithmeticCarryCells(event.target.value))} placeholder="3" />
+          </label>
           <label className="wide-field">
             <span>Consigne ou remarque</span>
-            <input value={block.caption} onChange={(event) => updateModalField("caption", event.target.value)} placeholder={block.type === "addition" ? "Je pose l'addition" : "Je pose la soustraction"} />
+            <input value={block.caption} onChange={(event) => updateModalField("caption", event.target.value)} placeholder={block.type === "addition" ? "Je pose l'addition" : block.type === "subtraction" ? "Je pose la soustraction" : "Je pose la multiplication"} />
           </label>
         </div>
       );
@@ -5101,7 +5484,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                       title={tool.label}
                       onClick={() => createStructuredToolAt(tool.id, canvasQuickMenu.clickX, canvasQuickMenu.clickY)}
                     >
-                      {tool.id === "fraction" ? "a/b" : tool.id === "addition" ? "+" : tool.id === "subtraction" ? "-" : tool.id === "division" ? "÷" : tool.id === "power" ? "x²" : "√"}
+                      {renderStructuredToolGlyph(tool.id)}
                     </button>
                   ))}
                   {activeInlineShortcuts
