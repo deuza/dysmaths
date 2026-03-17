@@ -20,7 +20,7 @@ import { jsPDF } from "jspdf";
 
 type StudyMode = "college" | "lycee";
 type SheetStyle = "seyes" | "large-grid" | "small-grid" | "blank";
-type StructuredTool = "fraction" | "addition" | "division" | "power" | "root";
+type StructuredTool = "fraction" | "addition" | "subtraction" | "division" | "power" | "root";
 type UtilityMenu = "highlight" | null;
 
 type FractionBlock = {
@@ -66,6 +66,24 @@ type DivisionBlock = {
 type AdditionBlock = {
   id: string;
   type: "addition";
+  top: string;
+  bottom: string;
+  result: string;
+  caption: string;
+  color: string;
+  fontSize: number;
+  fontWeight: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightColor: string | null;
+  x: number;
+  y: number;
+  width: number;
+};
+
+type SubtractionBlock = {
+  id: string;
+  type: "subtraction";
   top: string;
   bottom: string;
   result: string;
@@ -159,7 +177,7 @@ type FreehandStroke = {
   points: FreehandPoint[];
 };
 
-type MathBlock = FractionBlock | AdditionBlock | DivisionBlock | PowerBlock | RootBlock;
+type MathBlock = FractionBlock | AdditionBlock | SubtractionBlock | DivisionBlock | PowerBlock | RootBlock;
 
 type WriterState = {
   title: string;
@@ -227,6 +245,18 @@ type PendingSelection = {
 type ToolbarDragPayload =
   | { kind: "structured"; toolId: StructuredTool }
   | { kind: "shortcut"; shortcutId: string };
+
+type PendingInsertTool =
+  | { kind: "text" }
+  | { kind: "structured"; toolId: StructuredTool }
+  | { kind: "shortcut"; shortcutId: string }
+  | null;
+
+type InsertCursorPreview = {
+  x: number;
+  y: number;
+  visible: boolean;
+};
 
 type ToolbarDragMeta = {
   offsetX: number;
@@ -399,6 +429,7 @@ const SHEET_STYLE_OPTIONS = [
 const STRUCTURED_TOOLS = [
   { id: "fraction" as const, label: "Fraction posée", hint: "Numérateur au-dessus, dénominateur en dessous", modes: ["college", "lycee"] as StudyMode[] },
   { id: "addition" as const, label: "Addition posée", hint: "Deux termes alignés et un résultat", modes: ["college", "lycee"] as StudyMode[] },
+  { id: "subtraction" as const, label: "Soustraction posée", hint: "Deux termes alignés et un résultat", modes: ["college", "lycee"] as StudyMode[] },
   { id: "division" as const, label: "Division posée", hint: "Diviseur, dividende, quotient et reste", modes: ["college", "lycee"] as StudyMode[] },
   { id: "power" as const, label: "Puissance", hint: "Base, exposant et résultat", modes: ["college", "lycee"] as StudyMode[] },
   { id: "root" as const, label: "Racine", hint: "Radicande et résultat", modes: ["college", "lycee"] as StudyMode[] }
@@ -461,6 +492,30 @@ function renderShortcutGlyph(shortcut: Pick<InlineShortcutItem, "id" | "label">)
       {shortcut.label}
     </span>
   );
+}
+
+function renderStructuredToolGlyph(toolId: StructuredTool) {
+  if (toolId === "fraction") {
+    return "a/b";
+  }
+
+  if (toolId === "addition") {
+    return "+";
+  }
+
+  if (toolId === "subtraction") {
+    return "-";
+  }
+
+  if (toolId === "division") {
+    return "÷";
+  }
+
+  if (toolId === "power") {
+    return "x²";
+  }
+
+  return "√";
 }
 
 function getTextBoxWidth(text: string) {
@@ -819,6 +874,8 @@ function getBlockTitle(block: MathBlock) {
       return "Fraction posée";
     case "addition":
       return "Addition posée";
+    case "subtraction":
+      return "Soustraction posée";
     case "division":
       return "Division posée";
     case "power":
@@ -833,6 +890,7 @@ function getBlockTitle(block: MathBlock) {
 function getDefaultWidth(type: MathBlock["type"]) {
   switch (type) {
     case "addition":
+    case "subtraction":
       return 250;
     case "division":
       return 320;
@@ -934,7 +992,15 @@ function getDivisionQuotientColumns(block: DivisionBlock) {
   return Math.max(1, block.quotient.trim().length);
 }
 
-function getAdditionColumns(block: AdditionBlock) {
+function isColumnArithmeticBlock(block: MathBlock): block is AdditionBlock | SubtractionBlock {
+  return block.type === "addition" || block.type === "subtraction";
+}
+
+function getArithmeticOperator(block: AdditionBlock | SubtractionBlock) {
+  return block.type === "addition" ? "+" : "-";
+}
+
+function getAdditionColumns(block: AdditionBlock | SubtractionBlock) {
   return Math.max(3, block.top.trim().length, block.bottom.trim().length, block.result.trim().length);
 }
 
@@ -965,6 +1031,31 @@ function renderDivisionCellRow(
   );
 }
 
+function renderColumnArithmeticPreview(block: AdditionBlock | SubtractionBlock) {
+  const columns = getAdditionColumns(block);
+  const operator = getArithmeticOperator(block);
+
+  return (
+    <div className="math-layout addition-layout">
+      <div className="addition-preview">
+        <div className="addition-line">
+          <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+          {renderDivisionCellRow(block.top, columns, "addition-row", "end")}
+        </div>
+        <div className="addition-line">
+          <span className="addition-sign">{operator}</span>
+          {renderDivisionCellRow(block.bottom, columns, "addition-row addition-row-operation", "end")}
+        </div>
+        <div className="addition-line">
+          <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+          {renderDivisionCellRow(block.result, columns, "addition-row addition-row-result", "end")}
+        </div>
+      </div>
+      {block.caption ? <p className="math-caption">{block.caption}</p> : null}
+    </div>
+  );
+}
+
 function renderMathPreview(block: MathBlock) {
   if (block.type === "fraction") {
     return (
@@ -979,27 +1070,8 @@ function renderMathPreview(block: MathBlock) {
     );
   }
 
-  if (block.type === "addition") {
-    const columns = getAdditionColumns(block);
-    return (
-      <div className="math-layout addition-layout">
-        <div className="addition-preview">
-          <div className="addition-line">
-            <span className="addition-sign addition-sign-spacer" aria-hidden="true">+</span>
-            {renderDivisionCellRow(block.top, columns, "addition-row", "end")}
-          </div>
-          <div className="addition-line">
-            <span className="addition-sign">+</span>
-            {renderDivisionCellRow(block.bottom, columns, "addition-row addition-row-operation", "end")}
-          </div>
-          <div className="addition-line">
-            <span className="addition-sign addition-sign-spacer" aria-hidden="true">+</span>
-            {renderDivisionCellRow(block.result, columns, "addition-row addition-row-result", "end")}
-          </div>
-        </div>
-        {block.caption ? <p className="math-caption">{block.caption}</p> : null}
-      </div>
-    );
+  if (isColumnArithmeticBlock(block)) {
+    return renderColumnArithmeticPreview(block);
   }
 
   if (block.type === "division") {
@@ -1065,6 +1137,7 @@ function getInlineStartField(type: StructuredTool) {
     case "fraction":
       return "numerator";
     case "addition":
+    case "subtraction":
       return "top";
     case "division":
       return "dividend";
@@ -1082,6 +1155,7 @@ function getInlineFieldSequence(type: StructuredTool) {
     case "fraction":
       return ["numerator", "denominator"];
     case "addition":
+    case "subtraction":
       return ["top", "bottom", "result"];
     case "division":
       return ["dividend", "divisor", "quotient", "work"];
@@ -1115,6 +1189,10 @@ function isBlockEmpty(block: MathBlock) {
     return !block.top.trim() && !block.bottom.trim() && !block.result.trim();
   }
 
+  if (block.type === "subtraction") {
+    return !block.top.trim() && !block.bottom.trim() && !block.result.trim();
+  }
+
   if (block.type === "division") {
     return !block.work.trim() && !block.dividend.trim() && !block.divisor.trim() && !block.quotient.trim() && !block.remainder.trim();
   }
@@ -1141,6 +1219,8 @@ export function MathWorkbook() {
   const [editingBlock, setEditingBlock] = useState<EditingBlockState>(null);
   const [numericFieldCaretPositions, setNumericFieldCaretPositions] = useState<Record<string, number>>({});
   const [advancedTool, setAdvancedTool] = useState<AdvancedTool>(null);
+  const [pendingInsertTool, setPendingInsertTool] = useState<PendingInsertTool>(null);
+  const [insertCursorPreview, setInsertCursorPreview] = useState<InsertCursorPreview>({ x: 0, y: 0, visible: false });
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [draftStroke, setDraftStroke] = useState<FreehandPoint[] | null>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
@@ -1283,6 +1363,21 @@ export function MathWorkbook() {
       y: Math.max(18, rect.top - canvasBounds.top - 52)
     };
   }, [editingTextBoxId, isCanvasInteracting, selectedCount, selectedTextBox, selectionRect]);
+  const pendingInsertLabel = useMemo(() => {
+    if (!pendingInsertTool) {
+      return "";
+    }
+
+    if (pendingInsertTool.kind === "text") {
+      return "Texte";
+    }
+
+    if (pendingInsertTool.kind === "structured") {
+      return STRUCTURED_TOOLS.find((tool) => tool.id === pendingInsertTool.toolId)?.label ?? "Bloc";
+    }
+
+    return findShortcutById(pendingInsertTool.shortcutId)?.hint ?? findShortcutById(pendingInsertTool.shortcutId)?.label ?? "Symbole";
+  }, [pendingInsertTool, activeInlineShortcuts]);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -1324,6 +1419,18 @@ export function MathWorkbook() {
   useEffect(() => {
     advancedToolRef.current = advancedTool;
   }, [advancedTool]);
+
+  useEffect(() => {
+    if (pendingInsertTool) {
+      setAdvancedTool(null);
+      setCanvasQuickMenu(null);
+      setOpenMenu(null);
+      clearFloatingSelection();
+      return;
+    }
+
+    setInsertCursorPreview((current) => (current.visible ? { ...current, visible: false } : current));
+  }, [pendingInsertTool]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -1684,6 +1791,24 @@ export function MathWorkbook() {
       } satisfies MathBlock;
     }
 
+    if (type === "subtraction") {
+      return {
+        id: createId("subtraction"),
+        type,
+        top: "",
+        bottom: "",
+        result: "",
+        caption: "",
+        color: state.activeColor,
+        fontSize: defaultFontSize,
+        fontWeight: 500,
+        fontStyle: "normal",
+        underline: false,
+        highlightColor: null,
+        ...position
+      } satisfies MathBlock;
+    }
+
     if (type === "division") {
       return {
         id: createId("division"),
@@ -1760,6 +1885,17 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     const bounds = canvas.getBoundingClientRect();
 
     return getCanvasPlacementPosition(clientX - bounds.left - offsetX, clientY - bounds.top - offsetY, bounds.width - 24, bounds.height - 24, "soft");
+  }
+
+  function getExactCanvasPlacementPosition(x: number, y: number, maxX: number, maxY: number) {
+    return {
+      x: Math.max(18, Math.min(maxX, Math.round(x))),
+      y: Math.max(18, Math.min(maxY, Math.round(y))),
+      guides: {
+        x: null,
+        y: null
+      }
+    };
   }
 
   function getCanvasPlacementPosition(
@@ -1980,6 +2116,20 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       return;
     }
 
+    if (pendingInsertTool) {
+      const touch = event.touches[0];
+
+      if (!touch) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const point = getCanvasPoint(touch.clientX, touch.clientY);
+      placePendingInsertToolAt(point.x, point.y);
+      return;
+    }
+
     if (selectedTextBoxId) {
       event.preventDefault();
       closeFloatingTextEditing();
@@ -2036,11 +2186,85 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setOpenMenu(null);
   }
 
-  function createTextBoxAt(x: number, y: number) {
+  function collapseToolsPanelForTablet() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (window.matchMedia("(max-width: 1180px)").matches) {
+      setIsToolsPanelOpen(false);
+    }
+  }
+
+  function togglePendingInsertTool(nextTool: Exclude<PendingInsertTool, null>) {
+    setPendingInsertTool((current) => {
+      let nextValue: PendingInsertTool = nextTool;
+
+      if (!current) {
+        nextValue = nextTool;
+      } else if (current.kind !== nextTool.kind) {
+        nextValue = nextTool;
+      } else if (current.kind === "text" && nextTool.kind === "text") {
+        nextValue = null;
+      } else if (current.kind === "structured" && nextTool.kind === "structured" && current.toolId === nextTool.toolId) {
+        nextValue = null;
+      } else if (current.kind === "shortcut" && nextTool.kind === "shortcut" && current.shortcutId === nextTool.shortcutId) {
+        nextValue = null;
+      } else {
+        nextValue = nextTool;
+      }
+
+      if (nextValue) {
+        collapseToolsPanelForTablet();
+      }
+
+      return nextValue;
+    });
+  }
+
+  function updateInsertCursorPreview(clientX: number, clientY: number) {
+    if (!pendingInsertTool || !canvasRef.current) {
+      return;
+    }
+
+    const point = getCanvasPoint(clientX, clientY);
+    setInsertCursorPreview({ x: point.x, y: point.y, visible: true });
+  }
+
+  function hideInsertCursorPreview() {
+    setInsertCursorPreview((current) => (current.visible ? { ...current, visible: false } : current));
+  }
+
+  function placePendingInsertToolAt(x: number, y: number) {
+    if (!pendingInsertTool) {
+      return false;
+    }
+
+    if (pendingInsertTool.kind === "text") {
+      createTextBoxAt(x, y, "exact");
+      setPendingInsertTool(null);
+      return true;
+    }
+
+    if (pendingInsertTool.kind === "structured") {
+      createStructuredToolAt(pendingInsertTool.toolId, x, y, "exact");
+      setPendingInsertTool(null);
+      return true;
+    }
+
+    createShortcutSymbolAt(pendingInsertTool.shortcutId, x, y, "exact");
+    setPendingInsertTool(null);
+    return true;
+  }
+
+  function createTextBoxAt(x: number, y: number, mode: "exact" | "soft" = "soft") {
     const canvas = canvasRef.current;
     const bounds = canvas?.getBoundingClientRect();
-    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
-    const textBox = createFloatingTextBox(snappedPoint.x, snappedPoint.y);
+    const placement =
+      mode === "exact"
+        ? getExactCanvasPlacementPosition(x, y + FLOATING_TEXTBOX_Y_OFFSET, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24)
+        : getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+    const textBox = createFloatingTextBox(placement.x, placement.y);
     beginTransientHistorySession("edit");
 
     setState((current) => ({
@@ -2138,11 +2362,14 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     clearFloatingSelection();
   }
 
-  function createStructuredToolAt(type: StructuredTool, x: number, y: number) {
+  function createStructuredToolAt(type: StructuredTool, x: number, y: number, mode: "exact" | "soft" = "soft") {
     const canvas = canvasRef.current;
     const bounds = canvas?.getBoundingClientRect();
-    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
-    const block = { ...createBlock(type), x: snappedPoint.x, y: snappedPoint.y };
+    const placement =
+      mode === "exact"
+        ? getExactCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24)
+        : getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+    const block = { ...createBlock(type), x: placement.x, y: placement.y };
     beginTransientHistorySession("edit");
 
     setState((current) => ({
@@ -2153,7 +2380,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     setCanvasQuickMenu(null);
   }
 
-  function createShortcutSymbolAt(shortcutId: string, x: number, y: number) {
+  function createShortcutSymbolAt(shortcutId: string, x: number, y: number, mode: "exact" | "soft" = "soft") {
     const shortcut = findShortcutById(shortcutId);
 
     if (!shortcut) {
@@ -2162,8 +2389,11 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
 
     const canvas = canvasRef.current;
     const bounds = canvas?.getBoundingClientRect();
-    const snappedPoint = getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
-    const symbol = createFloatingSymbol(shortcut, snappedPoint.x, snappedPoint.y);
+    const placement =
+      mode === "exact"
+        ? getExactCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24)
+        : getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+    const symbol = createFloatingSymbol(shortcut, placement.x, placement.y);
 
     setState((current) => ({
       ...current,
@@ -3132,6 +3362,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
 
     toolbarDragMetaRef.current = { offsetX, offsetY, previewNode };
     toolbarDragUntilRef.current = Date.now() + 350;
+    setPendingInsertTool(null);
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData("application/x-maths-tool", JSON.stringify(payload));
     event.dataTransfer.setData("text/plain", payload.kind === "shortcut" ? payload.shortcutId : payload.toolId);
@@ -3270,6 +3501,31 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     );
   }
 
+  function renderInteractiveColumnArithmeticPreview(block: AdditionBlock | SubtractionBlock) {
+    const columns = getAdditionColumns(block);
+    const operator = getArithmeticOperator(block);
+
+    return (
+      <div className="math-layout addition-layout">
+        <div className="addition-preview">
+          <div className="addition-line">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            {renderBlockPreviewButton(block.id, "top", renderDivisionCellRow(block.top, columns, "addition-row", "end"), "addition-row-button")}
+          </div>
+          <div className="addition-line">
+            <span className="addition-sign">{operator}</span>
+            {renderBlockPreviewButton(block.id, "bottom", renderDivisionCellRow(block.bottom, columns, "addition-row addition-row-operation", "end"), "addition-row-button")}
+          </div>
+          <div className="addition-line">
+            <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+            {renderBlockPreviewButton(block.id, "result", renderDivisionCellRow(block.result, columns, "addition-row addition-row-result", "end"), "addition-row-button")}
+          </div>
+        </div>
+        {block.caption ? <p className="math-caption">{block.caption}</p> : null}
+      </div>
+    );
+  }
+
   function renderInteractiveMathPreview(block: MathBlock) {
     if (block.type === "fraction") {
       return (
@@ -3284,27 +3540,8 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       );
     }
 
-    if (block.type === "addition") {
-      const columns = getAdditionColumns(block);
-      return (
-        <div className="math-layout addition-layout">
-          <div className="addition-preview">
-            <div className="addition-line">
-              <span className="addition-sign addition-sign-spacer" aria-hidden="true">+</span>
-              {renderBlockPreviewButton(block.id, "top", renderDivisionCellRow(block.top, columns, "addition-row", "end"), "addition-row-button")}
-            </div>
-            <div className="addition-line">
-              <span className="addition-sign">+</span>
-              {renderBlockPreviewButton(block.id, "bottom", renderDivisionCellRow(block.bottom, columns, "addition-row addition-row-operation", "end"), "addition-row-button")}
-            </div>
-            <div className="addition-line">
-              <span className="addition-sign addition-sign-spacer" aria-hidden="true">+</span>
-              {renderBlockPreviewButton(block.id, "result", renderDivisionCellRow(block.result, columns, "addition-row addition-row-result", "end"), "addition-row-button")}
-            </div>
-          </div>
-          {block.caption ? <p className="math-caption">{block.caption}</p> : null}
-        </div>
-      );
+    if (isColumnArithmeticBlock(block)) {
+      return renderInteractiveColumnArithmeticPreview(block);
     }
 
     if (block.type === "division") {
@@ -3396,27 +3633,16 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       }
     });
 
-    if (block.type === "fraction") {
-      return (
-        <div className="math-layout fraction-layout">
-          <div className="fraction-preview fraction-preview-editing">
-            <input {...bindInlineInput("numerator")} value={block.numerator} placeholder="a" className="math-inline-input fraction-inline-input" />
-            <div className="fraction-bar" />
-            <input {...bindInlineInput("denominator")} value={block.denominator} placeholder="b" className="math-inline-input fraction-inline-input" />
-          </div>
-        </div>
-      );
-    }
-
-    if (block.type === "addition") {
-      const columns = getAdditionColumns(block);
-      const renderAdditionNumericField = (
+    const renderColumnArithmeticInlineEditor = (arithmeticBlock: AdditionBlock | SubtractionBlock) => {
+      const columns = getAdditionColumns(arithmeticBlock);
+      const operator = getArithmeticOperator(arithmeticBlock);
+      const renderArithmeticNumericField = (
         field: "top" | "bottom" | "result",
         value: string,
         displayClassName: string
       ) => {
         const isActive = currentField === field;
-        const caretKey = `${block.id}:${field}`;
+        const caretKey = `${arithmeticBlock.id}:${field}`;
         const caretPosition = numericFieldCaretPositions[caretKey] ?? Array.from(value).length;
         const targetCellIndex = getAlignedCaretCellIndex(value, columns, "end", caretPosition);
         const baseInputProps = bindInlineInput(field);
@@ -3446,7 +3672,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
               }}
               onChange={(event) => {
                 const nextValue = normalizeDivisionDecimalInput(event.target.value);
-                updateInlineBlockField(block.id, field, nextValue);
+                updateInlineBlockField(arithmeticBlock.id, field, nextValue);
                 updateNumericCaretPosition(caretKey, event.target.selectionStart ?? Array.from(nextValue).length);
               }}
             />
@@ -3459,20 +3685,36 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
         <div className="math-layout addition-layout">
           <div className="addition-preview">
             <div className="addition-line">
-              <span className="addition-sign addition-sign-spacer" aria-hidden="true">+</span>
-              {renderAdditionNumericField("top", block.top, "addition-row")}
+              <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+              {renderArithmeticNumericField("top", arithmeticBlock.top, "addition-row")}
             </div>
             <div className="addition-line">
-              <span className="addition-sign">+</span>
-              {renderAdditionNumericField("bottom", block.bottom, "addition-row addition-row-operation")}
+              <span className="addition-sign">{operator}</span>
+              {renderArithmeticNumericField("bottom", arithmeticBlock.bottom, "addition-row addition-row-operation")}
             </div>
             <div className="addition-line">
-              <span className="addition-sign addition-sign-spacer" aria-hidden="true">+</span>
-              {renderAdditionNumericField("result", block.result, "addition-row addition-row-result")}
+              <span className="addition-sign addition-sign-spacer" aria-hidden="true">{operator}</span>
+              {renderArithmeticNumericField("result", arithmeticBlock.result, "addition-row addition-row-result")}
             </div>
           </div>
         </div>
       );
+    };
+
+    if (block.type === "fraction") {
+      return (
+        <div className="math-layout fraction-layout">
+          <div className="fraction-preview fraction-preview-editing">
+            <input {...bindInlineInput("numerator")} value={block.numerator} placeholder="a" className="math-inline-input fraction-inline-input" />
+            <div className="fraction-bar" />
+            <input {...bindInlineInput("denominator")} value={block.denominator} placeholder="b" className="math-inline-input fraction-inline-input" />
+          </div>
+        </div>
+      );
+    }
+
+    if (isColumnArithmeticBlock(block)) {
+      return renderColumnArithmeticInlineEditor(block);
     }
 
     if (block.type === "division") {
@@ -3965,7 +4207,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       );
     }
 
-    if (block.type === "addition") {
+    if (block.type === "addition" || block.type === "subtraction") {
       return (
         <div className="math-editor-grid">
           <label>
@@ -3982,7 +4224,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
           </label>
           <label className="wide-field">
             <span>Consigne ou remarque</span>
-            <input value={block.caption} onChange={(event) => updateModalField("caption", event.target.value)} placeholder="Je pose l'addition" />
+            <input value={block.caption} onChange={(event) => updateModalField("caption", event.target.value)} placeholder={block.type === "addition" ? "Je pose l'addition" : "Je pose la soustraction"} />
           </label>
         </div>
       );
@@ -4026,7 +4268,16 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   }
 
   function toggleAdvancedToolMode(tool: AdvancedTool) {
-    setAdvancedTool((current) => (current === tool ? null : tool));
+    setPendingInsertTool(null);
+    setAdvancedTool((current) => {
+      const nextValue = current === tool ? null : tool;
+
+      if (nextValue) {
+        collapseToolsPanelForTablet();
+      }
+
+      return nextValue;
+    });
   }
 
   function handleHeaderDelete() {
@@ -4107,10 +4358,11 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
             <div className="toolbar-shortcut-group" aria-label="Outils d'insertion">
               <button
                 type="button"
-                className="toolbar-shortcut toolbar-shortcut-symbol"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${pendingInsertTool?.kind === "text" ? "toolbar-shortcut-active" : ""}`}
                 aria-label="Texte"
                 title="Ajouter une zone de texte"
-                onClick={createToolbarTextBox}
+                aria-pressed={pendingInsertTool?.kind === "text"}
+                onClick={() => togglePendingInsertTool({ kind: "text" })}
               >
                 T
               </button>
@@ -4118,8 +4370,9 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 <button
                   key={tool.id}
                   type="button"
-                  className="toolbar-shortcut toolbar-shortcut-symbol"
+                  className={`toolbar-shortcut toolbar-shortcut-symbol ${pendingInsertTool?.kind === "structured" && pendingInsertTool.toolId === tool.id ? "toolbar-shortcut-active" : ""}`}
                   aria-label={tool.label}
+                  aria-pressed={pendingInsertTool?.kind === "structured" && pendingInsertTool.toolId === tool.id}
                   draggable
                   title={tool.hint}
                   onDragStart={(event) => handleToolDragStart({ kind: "structured", toolId: tool.id }, event)}
@@ -4129,10 +4382,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                       return;
                     }
 
-                    openInsertModal(tool.id);
+                    togglePendingInsertTool({ kind: "structured", toolId: tool.id });
                   }}
                 >
-                  {tool.id === "fraction" ? "a/b" : tool.id === "addition" ? "+" : tool.id === "division" ? "÷" : tool.id === "power" ? "x²" : "√"}
+                  {renderStructuredToolGlyph(tool.id)}
                 </button>
               ))}
               <button
@@ -4153,9 +4406,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 <button
                   key={shortcut.id}
                   type="button"
-                  className="toolbar-shortcut toolbar-shortcut-symbol"
+                  className={`toolbar-shortcut toolbar-shortcut-symbol ${pendingInsertTool?.kind === "shortcut" && pendingInsertTool.shortcutId === shortcut.id ? "toolbar-shortcut-active" : ""}`}
                   draggable
                   title={shortcut.hint}
+                  aria-pressed={pendingInsertTool?.kind === "shortcut" && pendingInsertTool.shortcutId === shortcut.id}
                   onDragStart={(event) => handleToolDragStart({ kind: "shortcut", shortcutId: shortcut.id }, event)}
                   onDragEnd={handleToolDragEnd}
                   onClick={() => {
@@ -4163,7 +4417,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                       return;
                     }
 
-                    createToolbarShortcutSymbol(shortcut.id);
+                    togglePendingInsertTool({ kind: "shortcut", shortcutId: shortcut.id });
                   }}
                 >
                   {renderShortcutGlyph(shortcut)}
@@ -4179,9 +4433,10 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                 <button
                   key={shortcut.id}
                   type="button"
-                  className="toolbar-shortcut toolbar-shortcut-symbol"
+                  className={`toolbar-shortcut toolbar-shortcut-symbol ${pendingInsertTool?.kind === "shortcut" && pendingInsertTool.shortcutId === shortcut.id ? "toolbar-shortcut-active" : ""}`}
                   draggable
                   title={shortcut.hint}
+                  aria-pressed={pendingInsertTool?.kind === "shortcut" && pendingInsertTool.shortcutId === shortcut.id}
                   onDragStart={(event) => handleToolDragStart({ kind: "shortcut", shortcutId: shortcut.id }, event)}
                   onDragEnd={handleToolDragEnd}
                   onClick={() => {
@@ -4189,7 +4444,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                       return;
                     }
 
-                    createToolbarShortcutSymbol(shortcut.id);
+                    togglePendingInsertTool({ kind: "shortcut", shortcutId: shortcut.id });
                   }}
                 >
                   {renderShortcutGlyph(shortcut)}
@@ -4371,14 +4626,24 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
           </div>
 
           <div
-            className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" ? "document-canvas-draw-mode" : ""} ${advancedTool === "draw" || advancedTool === "select" || advancedTool === "move" ? "document-canvas-touch-locked" : ""}`}
+            className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" ? "document-canvas-draw-mode" : ""} ${pendingInsertTool ? "document-canvas-insert-mode" : ""} ${advancedTool === "draw" || advancedTool === "select" || advancedTool === "move" || pendingInsertTool ? "document-canvas-touch-locked" : ""}`}
             style={{ "--canvas-type-size": `${getDefaultCanvasFontSize(state.sheetStyle)}rem` } as ReactCSSProperties}
             ref={canvasRef}
             onDragOver={handleCanvasDragOver}
             onDragLeave={handleCanvasDragLeave}
             onDrop={handleCanvasDrop}
+            onMouseMove={(event) => updateInsertCursorPreview(event.clientX, event.clientY)}
+            onMouseLeave={hideInsertCursorPreview}
             onTouchStart={(event) => handleSurfaceTouchStart(event, event.currentTarget)}
             onMouseDown={(event) => {
+              if (pendingInsertTool && event.target === event.currentTarget) {
+                event.preventDefault();
+                event.stopPropagation();
+                const point = getCanvasPoint(event.clientX, event.clientY);
+                placePendingInsertToolAt(point.x, point.y);
+                return;
+              }
+
               if (canvasQuickMenu) {
                 event.preventDefault();
                 setCanvasQuickMenu(null);
@@ -4414,7 +4679,17 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
               className="canvas-editor"
               contentEditable
               suppressContentEditableWarning
+              onMouseMove={(event) => updateInsertCursorPreview(event.clientX, event.clientY)}
+              onMouseLeave={hideInsertCursorPreview}
               onMouseDown={(event) => {
+                if (pendingInsertTool && event.target === event.currentTarget) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const point = getCanvasPoint(event.clientX, event.clientY);
+                  placePendingInsertToolAt(point.x, point.y);
+                  return;
+                }
+
                 if (canvasQuickMenu) {
                   event.preventDefault();
                   setCanvasQuickMenu(null);
@@ -4452,6 +4727,25 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
               onKeyUp={saveSelection}
               onPaste={handlePaste}
             />
+
+            {pendingInsertTool && insertCursorPreview.visible ? (
+              <div
+                className="canvas-insert-cursor"
+                style={{ left: `${insertCursorPreview.x}px`, top: `${insertCursorPreview.y}px`, color: state.activeColor }}
+                aria-hidden="true"
+              >
+                {pendingInsertTool.kind === "text" ? "T" : pendingInsertTool.kind === "structured" ? renderStructuredToolGlyph(pendingInsertTool.toolId) : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
+              </div>
+            ) : null}
+
+            {pendingInsertTool ? (
+              <div key={`${pendingInsertTool.kind}-${pendingInsertLabel}`} className="canvas-insert-hint" aria-live="polite">
+                <span className="canvas-insert-hint-glyph" aria-hidden="true">
+                  {pendingInsertTool.kind === "text" ? "T" : pendingInsertTool.kind === "structured" ? renderStructuredToolGlyph(pendingInsertTool.toolId) : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
+                </span>
+                <span>{`Clique ou touche la feuille pour placer ${pendingInsertLabel.toLowerCase()}.`}</span>
+              </div>
+            ) : null}
 
             {state.blocks.map((block) => (
               <article
@@ -4807,7 +5101,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
                       title={tool.label}
                       onClick={() => createStructuredToolAt(tool.id, canvasQuickMenu.clickX, canvasQuickMenu.clickY)}
                     >
-                      {tool.id === "fraction" ? "a/b" : tool.id === "addition" ? "+" : tool.id === "division" ? "÷" : tool.id === "power" ? "x²" : "√"}
+                      {tool.id === "fraction" ? "a/b" : tool.id === "addition" ? "+" : tool.id === "subtraction" ? "-" : tool.id === "division" ? "÷" : tool.id === "power" ? "x²" : "√"}
                     </button>
                   ))}
                   {activeInlineShortcuts
