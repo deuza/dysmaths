@@ -3,6 +3,7 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 const sharedConfig: NextConfig = {
   devIndicators: false,
+  output: "standalone",
   webpack: (config, { dev }) => {
     if (dev) {
       config.cache = false;
