@@ -184,6 +184,7 @@ type FloatingTextBox = {
   id: string;
   type: "textBox";
   variant?: "default" | "note";
+  notation?: "plain" | "angle";
   text: string;
   color: string;
   fontSize: number;
@@ -2602,13 +2603,14 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
   } satisfies FloatingSymbol;
 }
 
-  function createFloatingTextBox(x: number, y: number, variant: "default" | "note" = "default") {
+  function createFloatingTextBox(x: number, y: number, variant: "default" | "note" = "default", notation: "plain" | "angle" = "plain") {
     const defaultFontSize = getDefaultCanvasFontSize(state.sheetStyle);
     const defaultNoteFontSize = getDefaultNoteFontSize(state.sheetStyle);
     return {
       id: createId("text"),
       type: "textBox",
       variant,
+      notation,
       text: "",
       color: state.activeColor,
       fontSize: variant === "note" ? defaultNoteFontSize : defaultFontSize,
@@ -2619,6 +2621,16 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       x,
       y: Math.max(18, y - FLOATING_TEXTBOX_Y_OFFSET),
       width: variant === "note" ? 72 : 100
+    } satisfies FloatingTextBox;
+  }
+
+  function createAngleTextBox(x: number, y: number) {
+    const initialText = "ABC";
+
+    return {
+      ...createFloatingTextBox(x, y, "default", "angle"),
+      text: initialText,
+      width: Math.max(100, getTextBoxWidth(initialText))
     } satisfies FloatingTextBox;
   }
 
@@ -3216,6 +3228,20 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       mode === "exact"
         ? getExactCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24)
         : getCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24, "soft");
+
+    if (shortcut.id === "angle") {
+      const textBox = createAngleTextBox(placement.x, placement.y);
+      beginTransientHistorySession("edit");
+
+      setState((current) => ({
+        ...current,
+        textBoxes: [...current.textBoxes, textBox]
+      }));
+      beginTextBoxEditing(textBox.id);
+      setCanvasQuickMenu(null);
+      return;
+    }
+
     const symbol = createFloatingSymbol(shortcut, placement.x, placement.y);
 
     setState((current) => ({
@@ -4353,6 +4379,18 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
       return;
     }
 
+    if (shortcut.id === "angle") {
+      const textBox = createAngleTextBox(position.x, position.y);
+      beginTransientHistorySession("edit");
+
+      setState((current) => ({
+        ...current,
+        textBoxes: [...current.textBoxes, textBox]
+      }));
+      beginTextBoxEditing(textBox.id);
+      return;
+    }
+
     const symbol = createFloatingSymbol(shortcut, position.x, position.y);
 
     setState((current) => ({
@@ -5466,6 +5504,19 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
     const estimatedWidth = Math.max(36, Math.round(shortcut.content.trim().length * defaultFontSize * 14));
     const estimatedHeight = Math.max(30, Math.round(defaultFontSize * 22));
     const position = getFirstAvailableCanvasObjectPosition(estimatedWidth, estimatedHeight);
+
+    if (shortcut.id === "angle") {
+      const textBox = createAngleTextBox(position.x, position.y);
+      beginTransientHistorySession("edit");
+
+      setState((current) => ({
+        ...current,
+        textBoxes: [...current.textBoxes, textBox]
+      }));
+      beginTextBoxEditing(textBox.id);
+      return;
+    }
+
     const symbol = createFloatingSymbol(shortcut, position.x, position.y);
     beginTransientHistorySession("edit");
 
@@ -6018,119 +6069,135 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
             ))}
 
             {state.textBoxes.map((textBox) => (
-              <article
-                key={textBox.id}
-                ref={(node) => {
-                  textBoxNodeRefs.current[textBox.id] = node;
-                }}
-                className={`floating-text-box ${textBox.variant === "note" ? "floating-text-box-note" : ""} ${selectedTextBoxIds.includes(textBox.id) ? "floating-text-box-selected" : ""}`}
-                style={{
-                  left: `${textBox.x}px`,
-                  top: `${textBox.y}px`,
-                  width: `${textBox.width}px`,
-                  zIndex: editingTextBoxId === textBox.id ? 9 : undefined,
-                  color: textBox.color,
-                  fontSize: `${textBox.fontSize}rem`,
-                  fontWeight: textBox.fontWeight,
-                  fontStyle: textBox.fontStyle,
-                  textDecoration: textBox.underline ? "underline" : "none",
-                  backgroundColor: textBox.highlightColor ?? undefined
-                }}
-                onMouseDown={(event) => {
-                  if (editingTextBoxId === textBox.id) {
-                    return;
-                  }
+              (() => {
+                const isAngleTextBox = textBox.notation === "angle";
 
-                  startDragging("textBox", textBox.id, textBox.x, textBox.y, event);
-                }}
-                onTouchStart={(event) => {
-                  handleTouchDragStart("textBox", textBox.id, textBox.x, textBox.y, event, editingTextBoxId === textBox.id);
-                }}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  beginTextBoxEditing(textBox.id);
-                }}
-              >
-                {editingTextBoxId === textBox.id ? (
-                  (() => {
-                    const shortcutLayout = getFloatingTextShortcutLayout(textBox.id);
+                return (
+                  <article
+                    key={textBox.id}
+                    ref={(node) => {
+                      textBoxNodeRefs.current[textBox.id] = node;
+                    }}
+                    className={`floating-text-box ${textBox.variant === "note" ? "floating-text-box-note" : ""} ${selectedTextBoxIds.includes(textBox.id) ? "floating-text-box-selected" : ""}`}
+                    style={{
+                      left: `${textBox.x}px`,
+                      top: `${textBox.y}px`,
+                      width: `${textBox.width}px`,
+                      zIndex: editingTextBoxId === textBox.id ? 9 : undefined,
+                      color: textBox.color,
+                      fontSize: `${textBox.fontSize}rem`,
+                      fontWeight: textBox.fontWeight,
+                      fontStyle: textBox.fontStyle,
+                      textDecoration: textBox.underline ? "underline" : "none",
+                      backgroundColor: textBox.highlightColor ?? undefined
+                    }}
+                    onMouseDown={(event) => {
+                      if (editingTextBoxId === textBox.id) {
+                        return;
+                      }
 
-                    return (
-                      <>
-                        <div
-                          className={`floating-text-shortcuts ${shortcutLayout.className}`}
-                          style={shortcutLayout.style}
-                          onMouseDown={(event) => event.stopPropagation()}
-                        >
-                          {textBoxShortcuts.map((shortcut) => (
-                            <button
-                              key={shortcut.id}
-                              type="button"
-                              className="floating-text-shortcut"
-                              title={shortcut.hint}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => insertIntoEditingTextBox(textBox.id, shortcut.content)}
+                      startDragging("textBox", textBox.id, textBox.x, textBox.y, event);
+                    }}
+                    onTouchStart={(event) => {
+                      handleTouchDragStart("textBox", textBox.id, textBox.x, textBox.y, event, editingTextBoxId === textBox.id);
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                      beginTextBoxEditing(textBox.id);
+                    }}
+                  >
+                    {editingTextBoxId === textBox.id ? (
+                      (() => {
+                        const shortcutLayout = getFloatingTextShortcutLayout(textBox.id);
+
+                        return (
+                          <>
+                            <div
+                              className={`floating-text-shortcuts ${shortcutLayout.className}`}
+                              style={shortcutLayout.style}
+                              onMouseDown={(event) => event.stopPropagation()}
                             >
-                              {renderShortcutGlyph(shortcut)}
-                            </button>
-                          ))}
+                              {textBoxShortcuts.map((shortcut) => (
+                                <button
+                                  key={shortcut.id}
+                                  type="button"
+                                  className="floating-text-shortcut"
+                                  title={shortcut.hint}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => insertIntoEditingTextBox(textBox.id, shortcut.content)}
+                                >
+                                  {renderShortcutGlyph(shortcut)}
+                                </button>
+                              ))}
+                            </div>
+                            <div className={isAngleTextBox ? "floating-text-angle-prefix" : ""}>
+                              {isAngleTextBox ? <span className="floating-text-angle-marker" aria-hidden="true">∠</span> : null}
+                              <input
+                                type="text"
+                                className="floating-text-input"
+                                value={textBox.text}
+                                placeholder="Écris ici"
+                                onMouseDown={(event) => {
+                                  setCanvasQuickMenu(null);
+                                  event.stopPropagation();
+                                  selectSingleTextBox(textBox.id);
+                                }}
+                                onFocus={() => {
+                                  selectSingleTextBox(textBox.id);
+                                }}
+                                onChange={(event) => {
+                                  const nextText = event.target.value;
+                                  const minimumWidth = textBox.variant === "note" ? 56 : 100;
+
+                                  updateTextBox(textBox.id, {
+                                    text: nextText,
+                                    width: Math.max(minimumWidth, getTextBoxWidth(nextText))
+                                  });
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key !== "Enter") {
+                                    return;
+                                  }
+
+                                  event.preventDefault();
+                                  event.currentTarget.blur();
+                                }}
+                                onBlur={(event) => {
+                                  if (!event.currentTarget.value.trim()) {
+                                    removeTextBox(textBox.id);
+                                    setEditingTextBoxId(null);
+                                    scheduleTransientHistoryCommit("edit");
+                                    return;
+                                  }
+
+                                  updateTextBox(textBox.id, {
+                                    text: event.currentTarget.value.trim(),
+                                    width: Math.max(textBox.variant === "note" ? 56 : 36, getTextBoxWidth(event.currentTarget.value))
+                                  });
+                                  setEditingTextBoxId(null);
+                                  clearFloatingSelection();
+                                  scheduleTransientHistoryCommit("edit");
+                                }}
+                              />
+                            </div>
+                          </>
+                        );
+                      })()
+                    ) : isAngleTextBox ? (
+                      <div className="floating-text-angle-prefix">
+                        <span className="floating-text-angle-marker" aria-hidden="true">∠</span>
+                        <div className="floating-text-content">
+                          {textBox.text || "ABC"}
                         </div>
-                        <input
-                          type="text"
-                          className="floating-text-input"
-                          value={textBox.text}
-                          placeholder="Écris ici"
-                          onMouseDown={(event) => {
-                            setCanvasQuickMenu(null);
-                            event.stopPropagation();
-                            selectSingleTextBox(textBox.id);
-                          }}
-                          onFocus={() => {
-                            selectSingleTextBox(textBox.id);
-                          }}
-                          onChange={(event) => {
-                            const nextText = event.target.value;
-                            const minimumWidth = textBox.variant === "note" ? 56 : 100;
-
-                            updateTextBox(textBox.id, {
-                              text: nextText,
-                              width: Math.max(minimumWidth, getTextBoxWidth(nextText))
-                            });
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter") {
-                              return;
-                            }
-
-                            event.preventDefault();
-                            event.currentTarget.blur();
-                          }}
-                          onBlur={(event) => {
-                            if (!event.currentTarget.value.trim()) {
-                              removeTextBox(textBox.id);
-                              setEditingTextBoxId(null);
-                              scheduleTransientHistoryCommit("edit");
-                              return;
-                            }
-
-                            updateTextBox(textBox.id, {
-                              text: event.currentTarget.value.trim(),
-                              width: Math.max(textBox.variant === "note" ? 56 : 36, getTextBoxWidth(event.currentTarget.value))
-                            });
-                            setEditingTextBoxId(null);
-                            clearFloatingSelection();
-                            scheduleTransientHistoryCommit("edit");
-                          }}
-                        />
-                      </>
-                    );
-                  })()
-                ) : (
-                  <div className="floating-text-content">
-                    {textBox.text || "Zone de texte"}
-                  </div>
-                )}
-              </article>
+                      </div>
+                    ) : (
+                      <div className="floating-text-content">
+                        {textBox.text || "Zone de texte"}
+                      </div>
+                    )}
+                  </article>
+                );
+              })()
             ))}
 
             <svg

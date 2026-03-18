@@ -2940,6 +2940,19 @@ input {
   text-overflow: ellipsis;
 }
 
+.floating-text-angle-prefix {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 0.12em;
+  min-width: 0;
+}
+
+.floating-text-angle-marker {
+  line-height: 1;
+  pointer-events: none;
+}
+
 .canvas-selection-rect {
   position: absolute;
   z-index: 3;
