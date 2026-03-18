@@ -562,6 +562,56 @@ button {
   box-shadow: inset 0 0 0 1px rgba(31, 45, 61, 0.14);
 }
 
+.geometry-panel-helper {
+  max-width: 18rem;
+}
+
+.geometry-settings {
+  display: grid;
+  grid-gap: 0.55rem;
+  gap: 0.55rem;
+  width: min(100%, 18rem);
+  margin-top: 0.25rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(92, 108, 129, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 251, 245, 0.74);
+}
+
+.geometry-settings-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgba(31, 45, 61, 0.78);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.geometry-settings-field {
+  display: grid;
+  grid-gap: 0.26rem;
+  gap: 0.26rem;
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.geometry-settings-field input {
+  min-width: 0;
+  padding: 0.48rem 0.58rem;
+  border: 1px solid rgba(92, 108, 129, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink);
+  font: inherit;
+}
+
+.geometry-settings-note {
+  margin: 0;
+  font-size: 0.77rem;
+  line-height: 1.35;
+  color: rgba(92, 108, 129, 0.92);
+}
+
 .toolbar-icon-actions {
   display: flex;
   align-items: center;
@@ -2727,6 +2777,113 @@ input {
 
 .canvas-draw-path-selected {
   stroke: rgba(217, 119, 69, 0.8);
+}
+
+.canvas-geometry-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-geometry-indicator {
+  position: absolute;
+  z-index: 5;
+  padding: 0.38rem 0.58rem;
+  border: 1px solid rgba(92, 108, 129, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 253, 249, 0.96);
+  box-shadow: 0 10px 22px rgba(31, 45, 61, 0.12);
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  transform: translate(12px, -20px);
+  pointer-events: none;
+}
+
+.canvas-geometry-layer-passive,
+.canvas-geometry-layer-passive .canvas-geometry-shape {
+  pointer-events: none;
+}
+
+.canvas-geometry-shape {
+  pointer-events: auto;
+  cursor: -webkit-grab;
+  cursor: grab;
+}
+
+.canvas-geometry-shape:active {
+  cursor: -webkit-grabbing;
+  cursor: grabbing;
+}
+
+.canvas-geometry-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 18;
+  pointer-events: stroke;
+}
+
+.canvas-geometry-line,
+.canvas-geometry-circle,
+.canvas-geometry-preview,
+.canvas-geometry-selection-ring {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.canvas-geometry-line,
+.canvas-geometry-circle {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.canvas-geometry-preview {
+  stroke: rgba(217, 119, 69, 0.82);
+  stroke-width: 2.4;
+  stroke-dasharray: 8 6;
+}
+
+.canvas-geometry-measure-line {
+  stroke: rgba(31, 45, 61, 0.76);
+}
+
+.canvas-geometry-selection-ring {
+  stroke: rgba(217, 119, 69, 0.7);
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+}
+
+.canvas-geometry-label {
+  font-size: 0.96rem;
+  font-weight: 700;
+  dominant-baseline: middle;
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+}
+
+.canvas-geometry-measure {
+  font-size: 0.82rem;
+  font-weight: 700;
+  fill: var(--ink);
+  stroke: rgba(255, 253, 249, 0.98);
+  stroke-width: 4px;
+  paint-order: stroke fill;
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+}
+
+.canvas-geometry-center,
+.canvas-geometry-point,
+.canvas-geometry-endpoint {
+  pointer-events: none;
 }
 
 .canvas-insert-cursor-highlighter {

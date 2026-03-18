@@ -22,6 +22,7 @@ type StudyMode = "college" | "lycee";
 type SheetStyle = "seyes" | "large-grid" | "small-grid" | "lined" | "blank";
 type StructuredTool = "fraction" | "addition" | "subtraction" | "multiplication" | "division" | "power" | "root";
 type UtilityMenu = "highlight" | null;
+type GeometryTool = "point" | "segment" | "line" | "ray" | "circle" | "measure";
 
 type FractionBlock = {
   id: string;
@@ -212,7 +213,42 @@ type FreehandStroke = {
   points: FreehandPoint[];
 };
 
+type GeometryPointShape = {
+  id: string;
+  type: "geometry";
+  kind: "point";
+  xMm: number;
+  yMm: number;
+  label: string;
+  color: string;
+  strokeWidthMm: number;
+};
+
+type GeometryLinearShape = {
+  id: string;
+  type: "geometry";
+  kind: "segment" | "line" | "ray";
+  axMm: number;
+  ayMm: number;
+  bxMm: number;
+  byMm: number;
+  color: string;
+  strokeWidthMm: number;
+};
+
+type GeometryCircleShape = {
+  id: string;
+  type: "geometry";
+  kind: "circle";
+  cxMm: number;
+  cyMm: number;
+  radiusMm: number;
+  color: string;
+  strokeWidthMm: number;
+};
+
 type MathBlock = FractionBlock | AdditionBlock | SubtractionBlock | MultiplicationBlock | DivisionBlock | PowerBlock | RootBlock;
+type GeometryShape = GeometryPointShape | GeometryLinearShape | GeometryCircleShape;
 
 type WriterState = {
   title: string;
@@ -226,6 +262,7 @@ type WriterState = {
   symbols: FloatingSymbol[];
   textBoxes: FloatingTextBox[];
   strokes: FreehandStroke[];
+  geometry: GeometryShape[];
 };
 
 type ModalState =
@@ -253,14 +290,17 @@ type InlineShortcutGroup = {
 };
 
 type DragState = {
-  itemType: "block" | "symbol" | "textBox" | "stroke";
+  itemType: "block" | "symbol" | "textBox" | "stroke" | "geometry";
   itemId: string;
   pointerOffsetX: number;
   pointerOffsetY: number;
+  pointerOriginX: number;
+  pointerOriginY: number;
   groupBlockPositions: Array<{ id: string; x: number; y: number }>;
   groupSymbolPositions: Array<{ id: string; x: number; y: number }>;
   groupTextBoxPositions: Array<{ id: string; x: number; y: number }>;
   groupStrokePositions: Array<{ id: string; x: number; y: number; points: FreehandPoint[] }>;
+  groupGeometryShapes: GeometryShape[];
   anchorX: number;
   anchorY: number;
 } | null;
@@ -321,6 +361,28 @@ type FloatingTextShortcutLayout = {
   style: ReactCSSProperties;
 };
 
+type GeometryPointCoordinate = {
+  xMm: number;
+  yMm: number;
+};
+
+type GeometryDraft = {
+  tool: GeometryTool;
+  start: GeometryPointCoordinate;
+  current: GeometryPointCoordinate;
+};
+
+type GeometryDraftIndicator = {
+  x: number;
+  y: number;
+  label: string;
+};
+
+type GeometryMeasurement = {
+  start: GeometryPointCoordinate;
+  end: GeometryPointCoordinate;
+};
+
 type SnapGuides = {
   x: number | null;
   y: number | null;
@@ -352,6 +414,10 @@ const DEFAULT_ACTIVE_COLOR = "#1f2d3d";
 const DEFAULT_HIGHLIGHT_TOOL_COLOR = "rgb(255 226 92)";
 const DEFAULT_SUM_SYMBOL_SIZE = 54;
 const DEFAULT_INTEGRAL_SYMBOL_SIZE = 60;
+const DEFAULT_GEOMETRY_STROKE_WIDTH_MM = 0.55;
+const GEOMETRY_POINT_RADIUS_MM = 1.15;
+const GEOMETRY_HIT_RADIUS_PX = 14;
+const GEOMETRY_LINE_EXTENT_PX = 2400;
 const HIGHLIGHT_STROKE_OPACITY = 0.4;
 const HIGHLIGHT_STROKE_WIDTH = 10;
 const MM_TO_PX = 96 / 25.4;
@@ -365,6 +431,10 @@ function mmToPx(mm: number) {
 
 function cmToPx(cm: number) {
   return mmToPx(cm * 10);
+}
+
+function pxToMm(px: number) {
+  return px / MM_TO_PX;
 }
 
 function getDefaultCanvasFontSize(sheetStyle: SheetStyle) {
@@ -457,7 +527,8 @@ function createDefaultState(sheetStyle: SheetStyle = "seyes"): WriterState {
     blocks: [],
     symbols: [],
     textBoxes: createDefaultHeaderTextBoxes(sheetStyle),
-    strokes: []
+    strokes: [],
+    geometry: []
   };
 }
 
@@ -484,6 +555,15 @@ const SHEET_STYLE_OPTIONS = [
   { id: "small-grid" as const, label: "Petits carreaux" },
   { id: "lined" as const, label: "Feuille lignée" },
   { id: "blank" as const, label: "Feuille blanche" }
+] as const;
+
+const GEOMETRY_TOOL_OPTIONS = [
+  { id: "point" as const, label: "Point", hint: "Placer un point", glyph: "•" },
+  { id: "segment" as const, label: "Segment", hint: "Tracer un segment", glyph: "AB" },
+  { id: "line" as const, label: "Droite", hint: "Tracer une droite", glyph: "↔" },
+  { id: "ray" as const, label: "Demi-droite", hint: "Tracer une demi-droite", glyph: "→" },
+  { id: "circle" as const, label: "Cercle", hint: "Tracer un cercle", glyph: "◯" },
+  { id: "measure" as const, label: "Règle", hint: "Mesurer une distance", glyph: "cm" }
 ] as const;
 
 const STRUCTURED_TOOLS = [
@@ -862,6 +942,195 @@ function normalizeStrokeShape(points: FreehandPoint[]): FreehandPoint[] {
   return points;
 }
 
+function getGeometryLinearDirection(shape: GeometryLinearShape) {
+  const dx = shape.bxMm - shape.axMm;
+  const dy = shape.byMm - shape.ayMm;
+  const length = Math.hypot(dx, dy);
+
+  if (length <= 0.0001) {
+    return { dx: 1, dy: 0, length: 0 };
+  }
+
+  return {
+    dx: dx / length,
+    dy: dy / length,
+    length
+  };
+}
+
+function dedupeGeometryRenderPoints(points: Array<{ x: number; y: number; t: number }>) {
+  return points.filter(
+    (point, index) =>
+      points.findIndex(
+        (candidate) =>
+          Math.abs(candidate.x - point.x) < 0.5 &&
+          Math.abs(candidate.y - point.y) < 0.5 &&
+          Math.abs(candidate.t - point.t) < 0.0001
+      ) === index
+  );
+}
+
+function getRenderedLinearGeometryPx(shape: GeometryLinearShape, canvasWidth: number, canvasHeight: number) {
+  const ax = mmToPx(shape.axMm);
+  const ay = mmToPx(shape.ayMm);
+  const bx = mmToPx(shape.bxMm);
+  const by = mmToPx(shape.byMm);
+
+  if (shape.kind === "segment") {
+    return { x1: ax, y1: ay, x2: bx, y2: by };
+  }
+
+  const dx = bx - ax;
+  const dy = by - ay;
+
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+    return null;
+  }
+
+  const candidates: Array<{ x: number; y: number; t: number }> = [];
+  const pushCandidate = (x: number, y: number, t: number) => {
+    if (x >= -0.5 && x <= canvasWidth + 0.5 && y >= -0.5 && y <= canvasHeight + 0.5) {
+      candidates.push({ x, y, t });
+    }
+  };
+
+  if (Math.abs(dx) > 0.001) {
+    const tLeft = (0 - ax) / dx;
+    pushCandidate(0, ay + tLeft * dy, tLeft);
+    const tRight = (canvasWidth - ax) / dx;
+    pushCandidate(canvasWidth, ay + tRight * dy, tRight);
+  }
+
+  if (Math.abs(dy) > 0.001) {
+    const tTop = (0 - ay) / dy;
+    pushCandidate(ax + tTop * dx, 0, tTop);
+    const tBottom = (canvasHeight - ay) / dy;
+    pushCandidate(ax + tBottom * dx, canvasHeight, tBottom);
+  }
+
+  const unique = dedupeGeometryRenderPoints(candidates).sort((left, right) => left.t - right.t);
+
+  if (shape.kind === "line") {
+    if (unique.length >= 2) {
+      const first = unique[0];
+      const last = unique[unique.length - 1];
+      return { x1: first.x, y1: first.y, x2: last.x, y2: last.y };
+    }
+
+    const direction = getGeometryLinearDirection(shape);
+    return {
+      x1: ax - direction.dx * GEOMETRY_LINE_EXTENT_PX,
+      y1: ay - direction.dy * GEOMETRY_LINE_EXTENT_PX,
+      x2: ax + direction.dx * GEOMETRY_LINE_EXTENT_PX,
+      y2: ay + direction.dy * GEOMETRY_LINE_EXTENT_PX
+    };
+  }
+
+  const insideCanvas = ax >= 0 && ax <= canvasWidth && ay >= 0 && ay <= canvasHeight;
+  const visibleCandidates = unique.filter((candidate) => candidate.t >= 0);
+
+  if (insideCanvas) {
+    const last = visibleCandidates[visibleCandidates.length - 1];
+
+    if (last) {
+      return { x1: ax, y1: ay, x2: last.x, y2: last.y };
+    }
+  }
+
+  if (visibleCandidates.length >= 2) {
+    const first = visibleCandidates[0];
+    const last = visibleCandidates[visibleCandidates.length - 1];
+    return { x1: first.x, y1: first.y, x2: last.x, y2: last.y };
+  }
+
+  const direction = getGeometryLinearDirection(shape);
+  return {
+    x1: ax,
+    y1: ay,
+    x2: ax + direction.dx * GEOMETRY_LINE_EXTENT_PX,
+    y2: ay + direction.dy * GEOMETRY_LINE_EXTENT_PX
+  };
+}
+
+function getGeometryShapeBoundsPx(shape: GeometryShape, canvasWidth: number, canvasHeight: number) {
+  if (shape.kind === "point") {
+    const radius = mmToPx(GEOMETRY_POINT_RADIUS_MM) + 10;
+    const x = mmToPx(shape.xMm);
+    const y = mmToPx(shape.yMm);
+    return {
+      x: x - radius,
+      y: y - radius,
+      width: radius * 2,
+      height: radius * 2
+    };
+  }
+
+  if (shape.kind === "circle") {
+    const radius = mmToPx(shape.radiusMm);
+    const x = mmToPx(shape.cxMm);
+    const y = mmToPx(shape.cyMm);
+    return {
+      x: x - radius,
+      y: y - radius,
+      width: radius * 2,
+      height: radius * 2
+    };
+  }
+
+  const rendered = getRenderedLinearGeometryPx(shape, canvasWidth, canvasHeight);
+
+  if (!rendered) {
+    const x = mmToPx(shape.axMm);
+    const y = mmToPx(shape.ayMm);
+    return { x, y, width: 1, height: 1 };
+  }
+
+  return {
+    x: Math.min(rendered.x1, rendered.x2),
+    y: Math.min(rendered.y1, rendered.y2),
+    width: Math.max(1, Math.abs(rendered.x2 - rendered.x1)),
+    height: Math.max(1, Math.abs(rendered.y2 - rendered.y1))
+  };
+}
+
+function translateGeometryShape(shape: GeometryShape, deltaXMm: number, deltaYMm: number): GeometryShape {
+  if (shape.kind === "point") {
+    return {
+      ...shape,
+      xMm: shape.xMm + deltaXMm,
+      yMm: shape.yMm + deltaYMm
+    };
+  }
+
+  if (shape.kind === "circle") {
+    return {
+      ...shape,
+      cxMm: shape.cxMm + deltaXMm,
+      cyMm: shape.cyMm + deltaYMm
+    };
+  }
+
+  return {
+    ...shape,
+    axMm: shape.axMm + deltaXMm,
+    ayMm: shape.ayMm + deltaYMm,
+    bxMm: shape.bxMm + deltaXMm,
+    byMm: shape.byMm + deltaYMm
+  };
+}
+
+function getGeometrySelectionMeasurement(shape: GeometryShape) {
+  if (shape.kind === "segment") {
+    return `${Math.round(Math.hypot(shape.bxMm - shape.axMm, shape.byMm - shape.ayMm))} mm`;
+  }
+
+  if (shape.kind === "circle") {
+    return `Ø ${Math.round(shape.radiusMm * 2)} mm`;
+  }
+
+  return null;
+}
+
 function cloneWriterState(value: WriterState) {
   return JSON.parse(JSON.stringify(value)) as WriterState;
 }
@@ -1007,6 +1276,52 @@ function parseStoredState(raw: string): WriterState | null {
             width: typeof stroke.width === "number" ? stroke.width : 2.6,
             opacity: typeof (stroke as { opacity?: unknown }).opacity === "number" ? (stroke as { opacity: number }).opacity : 1
           }))
+        : [],
+      geometry: Array.isArray((parsed as { geometry?: unknown }).geometry)
+        ? (parsed as { geometry: GeometryShape[] }).geometry
+            .filter((shape) => Boolean(shape) && typeof shape.id === "string" && typeof shape.type === "string" && shape.type === "geometry")
+            .reduce<GeometryShape[]>((accumulator, shape) => {
+              if (shape.kind === "point") {
+                if (typeof shape.xMm === "number" && typeof shape.yMm === "number") {
+                  accumulator.push({
+                    ...shape,
+                    label: typeof shape.label === "string" ? shape.label : "",
+                    color: typeof shape.color === "string" ? shape.color : DEFAULT_ACTIVE_COLOR,
+                    strokeWidthMm: typeof shape.strokeWidthMm === "number" ? shape.strokeWidthMm : DEFAULT_GEOMETRY_STROKE_WIDTH_MM
+                  } satisfies GeometryPointShape);
+                }
+
+                return accumulator;
+              }
+
+              if (shape.kind === "circle") {
+                if (typeof shape.cxMm === "number" && typeof shape.cyMm === "number" && typeof shape.radiusMm === "number") {
+                  accumulator.push({
+                    ...shape,
+                    color: typeof shape.color === "string" ? shape.color : DEFAULT_ACTIVE_COLOR,
+                    radiusMm: Math.max(0.5, shape.radiusMm),
+                    strokeWidthMm: typeof shape.strokeWidthMm === "number" ? shape.strokeWidthMm : DEFAULT_GEOMETRY_STROKE_WIDTH_MM
+                  } satisfies GeometryCircleShape);
+                }
+
+                return accumulator;
+              }
+
+              if (
+                typeof shape.axMm === "number" &&
+                typeof shape.ayMm === "number" &&
+                typeof shape.bxMm === "number" &&
+                typeof shape.byMm === "number"
+              ) {
+                accumulator.push({
+                  ...shape,
+                  color: typeof shape.color === "string" ? shape.color : DEFAULT_ACTIVE_COLOR,
+                  strokeWidthMm: typeof shape.strokeWidthMm === "number" ? shape.strokeWidthMm : DEFAULT_GEOMETRY_STROKE_WIDTH_MM
+                } satisfies GeometryLinearShape);
+              }
+
+              return accumulator;
+            }, [])
         : []
     };
   } catch {
@@ -1766,11 +2081,15 @@ export function MathWorkbook() {
   const [selectedSymbolIds, setSelectedSymbolIds] = useState<string[]>([]);
   const [selectedTextBoxIds, setSelectedTextBoxIds] = useState<string[]>([]);
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
+  const [selectedGeometryIds, setSelectedGeometryIds] = useState<string[]>([]);
   const [editingTextBoxId, setEditingTextBoxId] = useState<string | null>(null);
   const [editingBlock, setEditingBlock] = useState<EditingBlockState>(null);
   const [strikeModeBlockId, setStrikeModeBlockId] = useState<string | null>(null);
   const [numericFieldCaretPositions, setNumericFieldCaretPositions] = useState<Record<string, number>>({});
   const [advancedTool, setAdvancedTool] = useState<AdvancedTool>(null);
+  const [activeGeometryTool, setActiveGeometryTool] = useState<GeometryTool | null>(null);
+  const [geometryDraft, setGeometryDraft] = useState<GeometryDraft | null>(null);
+  const [geometryMeasurement, setGeometryMeasurement] = useState<GeometryMeasurement | null>(null);
   const [pendingInsertTool, setPendingInsertTool] = useState<PendingInsertTool>(null);
   const [insertCursorPreview, setInsertCursorPreview] = useState<InsertCursorPreview>({ x: 0, y: 0, visible: false });
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
@@ -1794,11 +2113,13 @@ export function MathWorkbook() {
   const symbolsRef = useRef<FloatingSymbol[]>([]);
   const textBoxesRef = useRef<FloatingTextBox[]>([]);
   const strokesRef = useRef<FreehandStroke[]>([]);
+  const geometryRef = useRef<GeometryShape[]>([]);
   const strikeModeBlockIdRef = useRef<string | null>(null);
   const selectedBlockIdsRef = useRef<string[]>([]);
   const selectedSymbolIdsRef = useRef<string[]>([]);
   const selectedTextBoxIdsRef = useRef<string[]>([]);
   const selectedStrokeIdsRef = useRef<string[]>([]);
+  const selectedGeometryIdsRef = useRef<string[]>([]);
   const isDrawingStrokeRef = useRef(false);
   const draftStrokeRef = useRef<FreehandPoint[]>([]);
   const draftStrokeStyleRef = useRef<{ color: string; width: number; opacity: number }>({
@@ -1809,6 +2130,8 @@ export function MathWorkbook() {
   const toolbarDragUntilRef = useRef(0);
   const toolbarDragMetaRef = useRef<ToolbarDragMeta | null>(null);
   const advancedToolRef = useRef<AdvancedTool>(null);
+  const activeGeometryToolRef = useRef<GeometryTool | null>(null);
+  const geometryDraftRef = useRef<GeometryDraft | null>(null);
   const editingBlockRef = useRef<EditingBlockState>(null);
   const recentInlineBlockInteractionRef = useRef<{ blockId: string; timeStamp: number } | null>(null);
   const symbolResizeRef = useRef<SymbolResizeState | null>(null);
@@ -1816,6 +2139,7 @@ export function MathWorkbook() {
   const symbolNodeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const textBoxNodeRefs = useRef<Record<string, HTMLElement | null>>({});
   const strokeNodeRefs = useRef<Record<string, SVGGElement | null>>({});
+  const geometryNodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const pendingFocusTextBoxIdRef = useRef<string | null>(null);
   const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | HTMLTextAreaElement | null>>>({});
   const selectedTextBoxMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1849,11 +2173,27 @@ export function MathWorkbook() {
     () => activeInlineShortcuts.flatMap((group) => group.items).filter((item) => item.modes.length === 1 && item.modes[0] === "lycee"),
     [activeInlineShortcuts]
   );
-  const selectedBlockId = selectedBlockIds.length === 1 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0 ? selectedBlockIds[0] : null;
-  const selectedSymbolId = selectedSymbolIds.length === 1 && selectedBlockIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0 ? selectedSymbolIds[0] : null;
-  const selectedTextBoxId = selectedTextBoxIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedStrokeIds.length === 0 ? selectedTextBoxIds[0] : null;
-  const selectedStrokeId = selectedStrokeIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 ? selectedStrokeIds[0] : null;
-  const selectedCount = selectedBlockIds.length + selectedSymbolIds.length + selectedTextBoxIds.length + selectedStrokeIds.length;
+  const selectedBlockId =
+    selectedBlockIds.length === 1 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0 && selectedGeometryIds.length === 0
+      ? selectedBlockIds[0]
+      : null;
+  const selectedSymbolId =
+    selectedSymbolIds.length === 1 && selectedBlockIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0 && selectedGeometryIds.length === 0
+      ? selectedSymbolIds[0]
+      : null;
+  const selectedTextBoxId =
+    selectedTextBoxIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedStrokeIds.length === 0 && selectedGeometryIds.length === 0
+      ? selectedTextBoxIds[0]
+      : null;
+  const selectedStrokeId =
+    selectedStrokeIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 && selectedGeometryIds.length === 0
+      ? selectedStrokeIds[0]
+      : null;
+  const selectedGeometryId =
+    selectedGeometryIds.length === 1 && selectedBlockIds.length === 0 && selectedSymbolIds.length === 0 && selectedTextBoxIds.length === 0 && selectedStrokeIds.length === 0
+      ? selectedGeometryIds[0]
+      : null;
+  const selectedCount = selectedBlockIds.length + selectedSymbolIds.length + selectedTextBoxIds.length + selectedStrokeIds.length + selectedGeometryIds.length;
   const selectedBlock = useMemo(
     () => state.blocks.find((block) => block.id === selectedBlockId) ?? null,
     [selectedBlockId, state.blocks]
@@ -1870,6 +2210,58 @@ export function MathWorkbook() {
     () => state.strokes.find((stroke) => stroke.id === selectedStrokeId) ?? null,
     [selectedStrokeId, state.strokes]
   );
+  const selectedGeometry = useMemo(
+    () => state.geometry.find((shape) => shape.id === selectedGeometryId) ?? null,
+    [selectedGeometryId, state.geometry]
+  );
+  const geometryPanelHelper = useMemo(() => {
+    if (!activeGeometryTool) {
+      return "Trace des figures précises en gardant l’échelle de la feuille pour l’impression.";
+    }
+
+    if (geometryDraft) {
+      if (activeGeometryTool === "measure") {
+        return "Clique un second point pour figer la mesure.";
+      }
+
+      return activeGeometryTool === "circle"
+        ? "Clique une seconde fois pour fixer le rayon du cercle."
+        : "Clique une seconde fois pour terminer la figure.";
+    }
+
+    if (activeGeometryTool === "measure") {
+      return "Clique deux points pour mesurer une distance sans créer d’objet.";
+    }
+
+    return activeGeometryTool === "point"
+      ? "Clique la feuille pour placer un point."
+      : activeGeometryTool === "circle"
+        ? "Clique la feuille pour placer le centre du cercle."
+        : "Clique la feuille pour placer le premier point.";
+  }, [activeGeometryTool, geometryDraft]);
+  const geometryDraftIndicator = useMemo<GeometryDraftIndicator | null>(() => {
+    if (!geometryDraft) {
+      return null;
+    }
+
+    const currentX = mmToPx(geometryDraft.current.xMm);
+    const currentY = mmToPx(geometryDraft.current.yMm);
+    const lengthMm = Math.hypot(geometryDraft.current.xMm - geometryDraft.start.xMm, geometryDraft.current.yMm - geometryDraft.start.yMm);
+
+    if (geometryDraft.tool === "circle") {
+      return {
+        x: currentX,
+        y: currentY,
+        label: `Ø ${Math.max(0, Math.round(lengthMm * 2))} mm`
+      };
+    }
+
+    return {
+      x: currentX,
+      y: currentY,
+      label: `${Math.max(0, Math.round(lengthMm))} mm`
+    };
+  }, [geometryDraft]);
   const selectedHighlightColor = useMemo(() => {
     const selectedItems = [
       ...state.blocks.filter((block) => selectedBlockIds.includes(block.id)).map((block) => block.highlightColor ?? ""),
@@ -1893,7 +2285,8 @@ export function MathWorkbook() {
       ...selectedBlockIds.map((id) => blockNodeRefs.current[id]),
       ...selectedSymbolIds.map((id) => symbolNodeRefs.current[id]),
       ...selectedTextBoxIds.map((id) => textBoxNodeRefs.current[id]),
-      ...selectedStrokeIds.map((id) => strokeNodeRefs.current[id])
+      ...selectedStrokeIds.map((id) => strokeNodeRefs.current[id]),
+      ...selectedGeometryIds.map((id) => geometryNodeRefs.current[id])
     ].filter((node): node is HTMLElement | SVGGElement => Boolean(node));
 
     if (selectedNodes.length === 0) {
@@ -1922,7 +2315,7 @@ export function MathWorkbook() {
       y: placement === "above" ? Math.max(18, minTop - menuOffset) : Math.max(18, belowY),
       placement
     };
-  }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.strokes, state.symbols, state.textBoxes]);
+  }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedGeometryIds, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.geometry, state.strokes, state.symbols, state.textBoxes]);
   useEffect(() => {
     if (!selectedTextBox || editingTextBoxId === selectedTextBox.id || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
       setSelectedTextBoxMenuPosition(null);
@@ -2029,7 +2422,8 @@ export function MathWorkbook() {
     symbolsRef.current = state.symbols;
     textBoxesRef.current = state.textBoxes;
     strokesRef.current = state.strokes;
-  }, [state.blocks, state.strokes, state.symbols, state.textBoxes]);
+    geometryRef.current = state.geometry;
+  }, [state.blocks, state.geometry, state.strokes, state.symbols, state.textBoxes]);
 
   useEffect(() => {
     stateRef.current = state;
@@ -2038,6 +2432,14 @@ export function MathWorkbook() {
   useEffect(() => {
     advancedToolRef.current = advancedTool;
   }, [advancedTool]);
+
+  useEffect(() => {
+    activeGeometryToolRef.current = activeGeometryTool;
+  }, [activeGeometryTool]);
+
+  useEffect(() => {
+    geometryDraftRef.current = geometryDraft;
+  }, [geometryDraft]);
 
   useEffect(() => {
     editingBlockRef.current = editingBlock;
@@ -2122,6 +2524,21 @@ export function MathWorkbook() {
         return;
       }
 
+      if (event.key === "Escape") {
+        if (geometryDraftRef.current) {
+          event.preventDefault();
+          clearGeometryDraftState();
+          return;
+        }
+
+        if (activeGeometryToolRef.current) {
+          event.preventDefault();
+          setActiveGeometryTool(null);
+          setSnapGuides({ x: null, y: null });
+          return;
+        }
+      }
+
       if (
         canvasQuickMenu &&
         event.key.length === 1 &&
@@ -2141,7 +2558,7 @@ export function MathWorkbook() {
 
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [canvasQuickMenu, selectedCount, historyPast.length, historyFuture.length, selectedBlock, selectedSymbol, selectedTextBox, selectedStroke]);
+  }, [canvasQuickMenu, selectedCount, historyPast.length, historyFuture.length, selectedBlock, selectedGeometry, selectedSymbol, selectedTextBox, selectedStroke]);
 
   useEffect(() => {
     if (pendingInsertTool) {
@@ -2192,7 +2609,8 @@ export function MathWorkbook() {
     selectedSymbolIdsRef.current = selectedSymbolIds;
     selectedTextBoxIdsRef.current = selectedTextBoxIds;
     selectedStrokeIdsRef.current = selectedStrokeIds;
-  }, [selectedBlockIds, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds]);
+    selectedGeometryIdsRef.current = selectedGeometryIds;
+  }, [selectedBlockIds, selectedGeometryIds, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds]);
 
   useEffect(() => {
     if (!pendingFocusTextBoxIdRef.current || editingTextBoxId !== pendingFocusTextBoxIdRef.current) {
@@ -2299,6 +2717,20 @@ export function MathWorkbook() {
         return;
       }
 
+      if (geometryDraftRef.current && !dragRef.current && !pendingSelectionRef.current && !isDrawingStrokeRef.current) {
+        const snappedPoint = getGeometrySnapPoint(clientX, clientY);
+        setGeometryDraft((current) =>
+          current
+            ? {
+                ...current,
+                current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+              }
+            : current
+        );
+        setSnapGuides(snappedPoint.guides);
+        return;
+      }
+
       if (isDrawingStrokeRef.current) {
         const point = getCanvasPoint(clientX, clientY);
         const currentPoints = draftStrokeRef.current;
@@ -2348,6 +2780,46 @@ export function MathWorkbook() {
       }
 
       const bounds = canvas.getBoundingClientRect();
+
+      if (dragRef.current.itemType === "geometry") {
+        const pointer = getPreciseCanvasPoint(clientX, clientY);
+        const deltaX = pointer.x - dragRef.current.pointerOriginX;
+        const deltaY = pointer.y - dragRef.current.pointerOriginY;
+        const intrinsic = getCanvasIntrinsicSize();
+        const measuredGeometry = dragRef.current.groupGeometryShapes.map((shape) => ({
+          id: shape.id,
+          bounds: getGeometryShapeBoundsPx(shape, intrinsic.width, intrinsic.height)
+        }));
+
+        if (measuredGeometry.length === 0) {
+          return;
+        }
+
+        const groupBounds = {
+          left: Math.min(...measuredGeometry.map((item) => item.bounds.x)),
+          top: Math.min(...measuredGeometry.map((item) => item.bounds.y)),
+          right: Math.max(...measuredGeometry.map((item) => item.bounds.x + item.bounds.width)),
+          bottom: Math.max(...measuredGeometry.map((item) => item.bounds.y + item.bounds.height))
+        };
+        const clampedDeltaX = Math.max(18 - groupBounds.left, Math.min(intrinsic.width - 18 - groupBounds.right, deltaX));
+        const clampedDeltaY = Math.max(18 - groupBounds.top, Math.min(intrinsic.height - 18 - groupBounds.bottom, deltaY));
+
+        setState((current) => ({
+          ...current,
+          geometry: current.geometry.map((shape) => {
+            const dragged = dragRef.current?.groupGeometryShapes.find((item) => item.id === shape.id);
+
+            if (!dragged) {
+              return shape;
+            }
+
+            return translateGeometryShape(dragged, pxToMm(clampedDeltaX), pxToMm(clampedDeltaY));
+          })
+        }));
+        setSnapGuides({ x: null, y: null });
+        return;
+      }
+
       const nextAnchorX = clientX - bounds.left - dragRef.current.pointerOffsetX;
       const nextAnchorY = clientY - bounds.top - dragRef.current.pointerOffsetY;
       const draggedNode =
@@ -2357,7 +2829,9 @@ export function MathWorkbook() {
             ? symbolNodeRefs.current[dragRef.current.itemId]
             : dragRef.current.itemType === "textBox"
               ? textBoxNodeRefs.current[dragRef.current.itemId]
-              : strokeNodeRefs.current[dragRef.current.itemId];
+              : dragRef.current.itemType === "stroke"
+                ? strokeNodeRefs.current[dragRef.current.itemId]
+                : geometryNodeRefs.current[dragRef.current.itemId];
       const snappedAnchor = getCanvasPlacementPosition(nextAnchorX, nextAnchorY, bounds.width - 24, bounds.height - 24, "soft", {
         height: draggedNode?.getBoundingClientRect().height ?? 0,
         snapOffsetY: 5
@@ -2421,7 +2895,8 @@ export function MathWorkbook() {
               y: Math.max(18, Math.min(bounds.height - 24, point.y + deltaY))
             }))
           };
-        })
+        }),
+        geometry: current.geometry
       }));
     }
 
@@ -2430,7 +2905,7 @@ export function MathWorkbook() {
     }
 
     function handleTouchMove(event: TouchEvent) {
-      if (!isDrawingStrokeRef.current && !pendingSelectionRef.current && !dragRef.current && !symbolResizeRef.current) {
+      if (!isDrawingStrokeRef.current && !pendingSelectionRef.current && !dragRef.current && !symbolResizeRef.current && !geometryDraftRef.current) {
         return;
       }
 
@@ -2870,6 +3345,7 @@ export function MathWorkbook() {
     setSelectedSymbolIds([]);
     setSelectedTextBoxIds([]);
     setSelectedStrokeIds([]);
+    setSelectedGeometryIds([]);
   }
 
   function selectSingleBlock(blockId: string) {
@@ -2877,6 +3353,7 @@ export function MathWorkbook() {
     setSelectedSymbolIds([]);
     setSelectedTextBoxIds([]);
     setSelectedStrokeIds([]);
+    setSelectedGeometryIds([]);
   }
 
   function selectSingleSymbol(symbolId: string) {
@@ -2884,6 +3361,7 @@ export function MathWorkbook() {
     setSelectedBlockIds([]);
     setSelectedTextBoxIds([]);
     setSelectedStrokeIds([]);
+    setSelectedGeometryIds([]);
   }
 
   function startSymbolResize(symbolId: string, handle: SymbolResizeHandle, clientX: number, clientY: number) {
@@ -2944,6 +3422,7 @@ export function MathWorkbook() {
     setSelectedBlockIds([]);
     setSelectedSymbolIds([]);
     setSelectedStrokeIds([]);
+    setSelectedGeometryIds([]);
   }
 
   function selectSingleStroke(strokeId: string) {
@@ -2951,6 +3430,7 @@ export function MathWorkbook() {
     setSelectedBlockIds([]);
     setSelectedSymbolIds([]);
     setSelectedTextBoxIds([]);
+    setSelectedGeometryIds([]);
   }
 
   function getCanvasPoint(clientX: number, clientY: number) {
@@ -2966,6 +3446,296 @@ export function MathWorkbook() {
       x: Math.max(0, Math.min(bounds.width, clientX - bounds.left)),
       y: Math.max(0, Math.min(bounds.height, clientY - bounds.top))
     };
+  }
+
+  function getCanvasIntrinsicSize() {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return {
+        width: Math.round(mmToPx(210)),
+        height: Math.round(mmToPx(297))
+      };
+    }
+
+    return {
+      width: canvas.clientWidth || Math.round(mmToPx(210)),
+      height: canvas.clientHeight || Math.round(mmToPx(297))
+    };
+  }
+
+  function getPreciseCanvasPoint(clientX: number, clientY: number) {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    const zoom = Math.max(0.01, stateRef.current.zoomPercent / 100);
+    const intrinsic = getCanvasIntrinsicSize();
+
+    return {
+      x: Math.max(0, Math.min(intrinsic.width, (clientX - bounds.left) / zoom)),
+      y: Math.max(0, Math.min(intrinsic.height, (clientY - bounds.top) / zoom))
+    };
+  }
+
+  function getGeometrySnapPoint(clientX: number, clientY: number) {
+    const intrinsic = getCanvasIntrinsicSize();
+    const point = getPreciseCanvasPoint(clientX, clientY);
+    let nextX = Math.max(18, Math.min(intrinsic.width - 18, Math.round(point.x)));
+    let nextY = Math.max(18, Math.min(intrinsic.height - 18, Math.round(point.y)));
+
+    return {
+      x: nextX,
+      y: nextY,
+      xMm: pxToMm(nextX),
+      yMm: pxToMm(nextY),
+      guides: {
+        x: null,
+        y: null
+      }
+    };
+  }
+
+  function createGeometryShapeFromDraft(draft: GeometryDraft): GeometryShape | null {
+    if (draft.tool === "measure") {
+      return null;
+    }
+
+    if (draft.tool === "point") {
+      return {
+        id: createId("geometry"),
+        type: "geometry",
+        kind: "point",
+        xMm: draft.current.xMm,
+        yMm: draft.current.yMm,
+        label: "",
+        color: stateRef.current.activeColor,
+        strokeWidthMm: DEFAULT_GEOMETRY_STROKE_WIDTH_MM
+      };
+    }
+
+    if (draft.tool === "circle") {
+      const radiusMm = Math.hypot(draft.current.xMm - draft.start.xMm, draft.current.yMm - draft.start.yMm);
+
+      if (radiusMm < 0.8) {
+        return null;
+      }
+
+      return {
+        id: createId("geometry"),
+        type: "geometry",
+        kind: "circle",
+        cxMm: draft.start.xMm,
+        cyMm: draft.start.yMm,
+        radiusMm,
+        color: stateRef.current.activeColor,
+        strokeWidthMm: DEFAULT_GEOMETRY_STROKE_WIDTH_MM
+      };
+    }
+
+    const distanceMm = Math.hypot(draft.current.xMm - draft.start.xMm, draft.current.yMm - draft.start.yMm);
+
+    if (distanceMm < 0.8) {
+      return null;
+    }
+
+    return {
+      id: createId("geometry"),
+      type: "geometry",
+      kind: draft.tool,
+      axMm: draft.start.xMm,
+      ayMm: draft.start.yMm,
+      bxMm: draft.current.xMm,
+      byMm: draft.current.yMm,
+      color: stateRef.current.activeColor,
+      strokeWidthMm: DEFAULT_GEOMETRY_STROKE_WIDTH_MM
+    };
+  }
+
+  function clearGeometryDraftState() {
+    setGeometryDraft(null);
+    setSnapGuides({ x: null, y: null });
+  }
+
+  function selectSingleGeometry(shapeId: string) {
+    setSelectedGeometryIds([shapeId]);
+    setSelectedBlockIds([]);
+    setSelectedSymbolIds([]);
+    setSelectedTextBoxIds([]);
+    setSelectedStrokeIds([]);
+  }
+
+  function insertGeometryShape(shape: GeometryShape) {
+    beginTransientHistorySession("edit");
+    setState((current) => ({
+      ...current,
+      geometry: [...current.geometry, shape]
+    }));
+    selectSingleGeometry(shape.id);
+    setCanvasQuickMenu(null);
+    setActiveGeometryTool(null);
+    clearGeometryDraftState();
+    scheduleTransientHistoryCommit("edit");
+  }
+
+  function updateGeometryShape(shapeId: string, updater: (shape: GeometryShape) => GeometryShape) {
+    setState((current) => ({
+      ...current,
+      geometry: current.geometry.map((shape) => (shape.id === shapeId ? updater(shape) : shape))
+    }));
+  }
+
+  function removeGeometryShape(shapeId: string) {
+    setState((current) => ({
+      ...current,
+      geometry: current.geometry.filter((shape) => shape.id !== shapeId)
+    }));
+    setSelectedGeometryIds((current) => current.filter((id) => id !== shapeId));
+  }
+
+  function updateSelectedPointLabel(label: string) {
+    if (!selectedGeometry || selectedGeometry.kind !== "point") {
+      return;
+    }
+
+    updateGeometryShape(selectedGeometry.id, (shape) => (shape.kind === "point" ? { ...shape, label } : shape));
+  }
+
+  function updateSelectedSegmentLengthCm(lengthCm: string) {
+    if (!selectedGeometry || selectedGeometry.kind !== "segment") {
+      return;
+    }
+
+    const nextLengthCm = Number.parseFloat(lengthCm.replace(",", "."));
+
+    if (!Number.isFinite(nextLengthCm) || nextLengthCm <= 0) {
+      return;
+    }
+
+    updateGeometryShape(selectedGeometry.id, (shape) => {
+      if (shape.kind !== "segment") {
+        return shape;
+      }
+
+      const direction = getGeometryLinearDirection(shape);
+      const nextLengthMm = Math.max(1, nextLengthCm * 10);
+
+      return {
+        ...shape,
+        bxMm: shape.axMm + direction.dx * nextLengthMm,
+        byMm: shape.ayMm + direction.dy * nextLengthMm
+      };
+    });
+  }
+
+  function updateSelectedCircleRadiusCm(radiusCm: string) {
+    if (!selectedGeometry || selectedGeometry.kind !== "circle") {
+      return;
+    }
+
+    const nextRadiusCm = Number.parseFloat(radiusCm.replace(",", "."));
+
+    if (!Number.isFinite(nextRadiusCm) || nextRadiusCm <= 0) {
+      return;
+    }
+
+    updateGeometryShape(selectedGeometry.id, (shape) =>
+      shape.kind === "circle"
+        ? {
+            ...shape,
+            radiusMm: Math.max(1, nextRadiusCm * 10)
+          }
+        : shape
+    );
+  }
+
+  function toggleGeometryTool(tool: GeometryTool) {
+    setPendingInsertTool(null);
+    setAdvancedTool(null);
+    setCanvasQuickMenu(null);
+    setOpenMenu(null);
+    setActiveGeometryTool((current) => {
+      const nextValue = current === tool ? null : tool;
+
+      if (!nextValue) {
+        clearGeometryDraftState();
+        setGeometryMeasurement(null);
+      } else {
+        setGeometryDraft(null);
+        setSnapGuides({ x: null, y: null });
+        setGeometryMeasurement(null);
+        collapseToolsPanelForTablet();
+      }
+
+      return nextValue;
+    });
+  }
+
+  function handleGeometrySurfacePointer(clientX: number, clientY: number) {
+    const tool = activeGeometryToolRef.current;
+
+    if (!tool) {
+      return false;
+    }
+
+    const snappedPoint = getGeometrySnapPoint(clientX, clientY);
+    setSnapGuides(snappedPoint.guides);
+
+    if (tool === "point") {
+      setGeometryMeasurement(null);
+      const pointShape = createGeometryShapeFromDraft({
+        tool,
+        start: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm },
+        current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+      });
+
+      if (pointShape) {
+        insertGeometryShape(pointShape);
+      }
+
+      return true;
+    }
+
+    const currentDraft = geometryDraftRef.current;
+
+    if (!currentDraft || currentDraft.tool !== tool) {
+      if (tool === "measure") {
+        setGeometryMeasurement(null);
+      }
+
+      setGeometryDraft({
+        tool,
+        start: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm },
+        current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+      });
+      clearFloatingSelection();
+      setCanvasQuickMenu(null);
+      return true;
+    }
+
+    if (tool === "measure") {
+      setGeometryMeasurement({
+        start: currentDraft.start,
+        end: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+      });
+      clearGeometryDraftState();
+      return true;
+    }
+
+    const completedShape = createGeometryShapeFromDraft({
+      ...currentDraft,
+      current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+    });
+
+    if (completedShape) {
+      insertGeometryShape(completedShape);
+    }
+
+    clearGeometryDraftState();
+    return true;
   }
 
   function normalizeSelectionRect(rect: Exclude<SelectionRect, null>) {
@@ -3054,11 +3824,29 @@ export function MathWorkbook() {
         return right >= normalized.left && left <= normalized.right && bottom >= normalized.top && top <= normalized.bottom;
       })
       .map((stroke) => stroke.id);
+    const nextGeometryIds = geometryRef.current
+      .filter((shape) => {
+        const node = geometryNodeRefs.current[shape.id];
+
+        if (!node) {
+          return false;
+        }
+
+        const bounds = node.getBoundingClientRect();
+        const left = bounds.left - canvasBounds.left;
+        const top = bounds.top - canvasBounds.top;
+        const right = left + bounds.width;
+        const bottom = top + bounds.height;
+
+        return right >= normalized.left && left <= normalized.right && bottom >= normalized.top && top <= normalized.bottom;
+      })
+      .map((shape) => shape.id);
 
     setSelectedBlockIds(nextBlockIds);
     setSelectedSymbolIds(nextSymbolIds);
     setSelectedTextBoxIds(nextTextBoxIds);
     setSelectedStrokeIds(nextStrokeIds);
+    setSelectedGeometryIds(nextGeometryIds);
   }
 
   function beginAreaSelection(clientX: number, clientY: number) {
@@ -3081,6 +3869,19 @@ export function MathWorkbook() {
     }
 
     if (event.target !== currentTarget && !allowEditorSurface) {
+      return;
+    }
+
+    if (activeGeometryToolRef.current) {
+      const touch = event.touches[0];
+
+      if (!touch) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      handleGeometrySurfacePointer(touch.clientX, touch.clientY);
       return;
     }
 
@@ -3180,6 +3981,9 @@ export function MathWorkbook() {
   }
 
   function togglePendingInsertTool(nextTool: Exclude<PendingInsertTool, null>) {
+    setActiveGeometryTool(null);
+    clearGeometryDraftState();
+    setGeometryMeasurement(null);
     setPendingInsertTool((current) => {
       let nextValue: PendingInsertTool = nextTool;
 
@@ -3726,6 +4530,9 @@ export function MathWorkbook() {
       ),
       strokes: current.strokes.map((stroke) =>
         selectedStrokeIdsRef.current.includes(stroke.id) ? { ...stroke, color } : stroke
+      ),
+      geometry: current.geometry.map((shape) =>
+        selectedGeometryIdsRef.current.includes(shape.id) ? { ...shape, color } : shape
       )
     }));
 
@@ -3856,6 +4663,9 @@ export function MathWorkbook() {
     const shouldDisableHighlight = advancedTool === "highlight" && nextHighlight !== null && state.activeHighlightColor === nextHighlight;
     const resolvedHighlight = shouldDisableHighlight ? null : nextHighlight;
 
+    setActiveGeometryTool(null);
+    clearGeometryDraftState();
+    setGeometryMeasurement(null);
     setState((current) => ({
       ...current,
       activeHighlightColor: resolvedHighlight
@@ -4105,7 +4915,8 @@ export function MathWorkbook() {
       blocks: current.blocks.filter((block) => !selectedBlockIds.includes(block.id)),
       symbols: current.symbols.filter((symbol) => !selectedSymbolIds.includes(symbol.id)),
       textBoxes: current.textBoxes.filter((textBox) => !selectedTextBoxIds.includes(textBox.id)),
-      strokes: current.strokes.filter((stroke) => !selectedStrokeIds.includes(stroke.id))
+      strokes: current.strokes.filter((stroke) => !selectedStrokeIds.includes(stroke.id)),
+      geometry: current.geometry.filter((shape) => !selectedGeometryIds.includes(shape.id))
     }));
     clearFloatingSelection();
   }
@@ -4117,9 +4928,11 @@ export function MathWorkbook() {
     setEditingBlock(null);
     setEditingTextBoxId(null);
     setDraftStroke(null);
+    setGeometryMeasurement(null);
     isDrawingStrokeRef.current = false;
     draftStrokeRef.current = [];
     draftStrokeStyleRef.current = { color: stateRef.current.activeColor, width: 2.6, opacity: 1 };
+    setGeometryDraft(null);
     clearFloatingSelection();
   }
 
@@ -4284,6 +5097,24 @@ export function MathWorkbook() {
             height: Math.max(24, rect?.height ?? strokeBounds.height),
             anchorOffsetY: Math.max(24, rect?.height ?? strokeBounds.height) / 2
           };
+        }),
+      ...state.geometry
+        .filter((shape) => selectedGeometryIds.includes(shape.id))
+        .map((shape) => {
+          const intrinsic = getCanvasIntrinsicSize();
+          const node = geometryNodeRefs.current[shape.id];
+          const rect = node?.getBoundingClientRect();
+          const bounds = getGeometryShapeBoundsPx(shape, intrinsic.width, intrinsic.height);
+
+          return {
+            id: shape.id,
+            type: "geometry" as const,
+            x: bounds.x,
+            y: bounds.y,
+            width: Math.max(24, rect?.width ?? bounds.width),
+            height: Math.max(24, rect?.height ?? bounds.height),
+            anchorOffsetY: Math.max(24, rect?.height ?? bounds.height) / 2
+          };
         })
     ];
 
@@ -4312,7 +5143,7 @@ export function MathWorkbook() {
 
     let bestLayout:
       | {
-          positions: Array<{ id: string; type: "block" | "symbol" | "textBox" | "stroke"; x: number; y: number }>;
+          positions: Array<{ id: string; type: "block" | "symbol" | "textBox" | "stroke" | "geometry"; x: number; y: number }>;
           score: number;
         }
       | null = null;
@@ -4404,11 +5235,22 @@ export function MathWorkbook() {
             y: point.y + deltaY
           }))
         };
+      }),
+      geometry: current.geometry.map((shape) => {
+        const nextPosition = positionMap.get(`geometry:${shape.id}`);
+
+        if (!nextPosition) {
+          return shape;
+        }
+
+        const intrinsic = getCanvasIntrinsicSize();
+        const currentBounds = getGeometryShapeBoundsPx(shape, intrinsic.width, intrinsic.height);
+        return translateGeometryShape(shape, pxToMm(nextPosition.x - currentBounds.x), pxToMm(nextPosition.y - currentBounds.y));
       })
     }));
   }
 
-  function startDragging(itemType: "block" | "symbol" | "textBox" | "stroke", itemId: string, x: number, y: number, event: ReactMouseEvent<Element>) {
+  function startDragging(itemType: "block" | "symbol" | "textBox" | "stroke" | "geometry", itemId: string, x: number, y: number, event: ReactMouseEvent<Element>) {
     const target = event.target as HTMLElement | null;
 
     if (target?.closest?.(".floating-math-symbol-resize-handle") || symbolResizeRef.current) {
@@ -4420,9 +5262,10 @@ export function MathWorkbook() {
     startDraggingAtPoint(itemType, itemId, x, y, event.clientX, event.clientY);
   }
 
-  function startDraggingAtPoint(itemType: "block" | "symbol" | "textBox" | "stroke", itemId: string, x: number, y: number, clientX: number, clientY: number) {
+  function startDraggingAtPoint(itemType: "block" | "symbol" | "textBox" | "stroke" | "geometry", itemId: string, x: number, y: number, clientX: number, clientY: number) {
     setCanvasQuickMenu(null);
     setIsCanvasInteracting(true);
+    clearGeometryDraftState();
 
     beginTransientHistorySession("drag");
 
@@ -4440,7 +5283,9 @@ export function MathWorkbook() {
           ? selectedSymbolIdsRef.current.includes(itemId)
           : itemType === "textBox"
             ? selectedTextBoxIdsRef.current.includes(itemId)
-            : selectedStrokeIdsRef.current.includes(itemId);
+            : itemType === "stroke"
+              ? selectedStrokeIdsRef.current.includes(itemId)
+              : selectedGeometryIdsRef.current.includes(itemId);
     const currentBlockIds = keepCurrentSelection
       ? selectedBlockIdsRef.current
       : itemType === "block"
@@ -4461,12 +5306,20 @@ export function MathWorkbook() {
       : itemType === "stroke"
         ? [itemId]
         : [];
+    const currentGeometryIds = keepCurrentSelection
+      ? selectedGeometryIdsRef.current
+      : itemType === "geometry"
+        ? [itemId]
+        : [];
+    const precisePoint = getPreciseCanvasPoint(clientX, clientY);
 
     dragRef.current = {
       itemType,
       itemId,
       pointerOffsetX: clientX - bounds.left - x,
       pointerOffsetY: clientY - bounds.top - y,
+      pointerOriginX: precisePoint.x,
+      pointerOriginY: precisePoint.y,
       groupBlockPositions: blocksRef.current
         .filter((block) => currentBlockIds.includes(block.id))
         .map((block) => ({ id: block.id, x: block.x, y: block.y })),
@@ -4482,6 +5335,9 @@ export function MathWorkbook() {
           const strokeBounds = getStrokeBounds(stroke.points);
           return { id: stroke.id, x: strokeBounds.x, y: strokeBounds.y, points: stroke.points.map((point) => ({ ...point })) };
         }),
+      groupGeometryShapes: geometryRef.current
+        .filter((shape) => currentGeometryIds.includes(shape.id))
+        .map((shape) => JSON.parse(JSON.stringify(shape)) as GeometryShape),
       anchorX: x,
       anchorY: y
     };
@@ -4493,14 +5349,16 @@ export function MathWorkbook() {
         selectSingleSymbol(itemId);
       } else if (itemType === "textBox") {
         selectSingleTextBox(itemId);
-      } else {
+      } else if (itemType === "stroke") {
         selectSingleStroke(itemId);
+      } else {
+        selectSingleGeometry(itemId);
       }
     }
   }
 
   function handleTouchDragStart(
-    itemType: "block" | "symbol" | "textBox" | "stroke",
+    itemType: "block" | "symbol" | "textBox" | "stroke" | "geometry",
     itemId: string,
     x: number,
     y: number,
@@ -5725,6 +6583,9 @@ export function MathWorkbook() {
   }
 
   function toggleAdvancedToolMode(tool: AdvancedTool) {
+    setActiveGeometryTool(null);
+    clearGeometryDraftState();
+    setGeometryMeasurement(null);
     setPendingInsertTool(null);
     setAdvancedTool((current) => {
       const nextValue = current === tool ? null : tool;
@@ -5764,6 +6625,11 @@ export function MathWorkbook() {
 
     if (selectedStroke) {
       removeStroke(selectedStroke.id);
+      return;
+    }
+
+    if (selectedGeometry) {
+      removeGeometryShape(selectedGeometry.id);
     }
   }
 
@@ -5895,6 +6761,67 @@ export function MathWorkbook() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="toolbar-row toolbar-row-secondary sidebar-block">
+            <p className="sidebar-block-label">Géométrie précise</p>
+            <div className="toolbar-shortcut-group toolbar-shortcut-group-symbols" aria-label="Outils de géométrie précise">
+              {GEOMETRY_TOOL_OPTIONS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className={`toolbar-shortcut toolbar-shortcut-symbol ${activeGeometryTool === tool.id ? "toolbar-shortcut-active" : ""}`}
+                  aria-label={tool.label}
+                  aria-pressed={activeGeometryTool === tool.id}
+                  title={tool.hint}
+                  onClick={() => toggleGeometryTool(tool.id)}
+                >
+                  {tool.glyph}
+                </button>
+              ))}
+            </div>
+            <p className="sidebar-helper geometry-panel-helper">{geometryPanelHelper}</p>
+            {selectedGeometry ? (
+              <div className="geometry-settings" onMouseDown={(event) => event.stopPropagation()}>
+                <p className="geometry-settings-title">Objet sélectionné</p>
+                {selectedGeometry.kind === "point" ? (
+                  <label className="geometry-settings-field">
+                    <span>Nom du point</span>
+                    <input
+                      type="text"
+                      value={selectedGeometry.label}
+                      placeholder="A"
+                      onChange={(event) => updateSelectedPointLabel(event.target.value.toUpperCase().slice(0, 4))}
+                    />
+                  </label>
+                ) : null}
+                {selectedGeometry.kind === "segment" ? (
+                  <label className="geometry-settings-field">
+                    <span>Longueur (cm)</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={Number((Math.hypot(selectedGeometry.bxMm - selectedGeometry.axMm, selectedGeometry.byMm - selectedGeometry.ayMm) / 10).toFixed(2))}
+                      onChange={(event) => updateSelectedSegmentLengthCm(event.target.value)}
+                    />
+                  </label>
+                ) : null}
+                {selectedGeometry.kind === "circle" ? (
+                  <label className="geometry-settings-field">
+                    <span>Rayon (cm)</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={Number((selectedGeometry.radiusMm / 10).toFixed(2))}
+                      onChange={(event) => updateSelectedCircleRadiusCm(event.target.value)}
+                    />
+                  </label>
+                ) : null}
+                <p className="geometry-settings-note">Les figures sont stockées en millimètres pour rester à l’échelle dans le PDF.</p>
+              </div>
+            ) : null}
           </div>
 
           <div className="toolbar-row toolbar-row-secondary sidebar-block">
@@ -6128,7 +7055,7 @@ export function MathWorkbook() {
             >
             <div className="document-canvas-stage">
               <div
-                className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" || advancedTool === "highlight" ? "document-canvas-draw-mode" : ""} ${advancedTool === "highlight" ? "document-canvas-highlight-mode" : ""} ${pendingInsertTool ? "document-canvas-insert-mode" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || advancedTool === "select" || advancedTool === "move" || pendingInsertTool ? "document-canvas-touch-locked" : ""}`}
+                className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || activeGeometryTool ? "document-canvas-draw-mode" : ""} ${advancedTool === "highlight" ? "document-canvas-highlight-mode" : ""} ${pendingInsertTool ? "document-canvas-insert-mode" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || advancedTool === "select" || advancedTool === "move" || pendingInsertTool || activeGeometryTool ? "document-canvas-touch-locked" : ""}`}
                 style={{ "--canvas-type-size": `${getDefaultCanvasFontSize(state.sheetStyle)}rem`, ["zoom" as string]: state.zoomPercent / 100 } as ReactCSSProperties}
                 ref={canvasRef}
                 onDragOver={handleCanvasDragOver}
@@ -6138,6 +7065,13 @@ export function MathWorkbook() {
                 onMouseLeave={hideInsertCursorPreview}
                 onTouchStart={(event) => handleSurfaceTouchStart(event, event.currentTarget)}
                 onMouseDown={(event) => {
+              if (activeGeometryTool && event.target === event.currentTarget) {
+                event.preventDefault();
+                event.stopPropagation();
+                handleGeometrySurfacePointer(event.clientX, event.clientY);
+                return;
+              }
+
               if (pendingInsertTool && event.target === event.currentTarget) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -6184,6 +7118,13 @@ export function MathWorkbook() {
               onMouseMove={(event) => updateInsertCursorPreview(event.clientX, event.clientY)}
               onMouseLeave={hideInsertCursorPreview}
               onMouseDown={(event) => {
+                if (activeGeometryTool && event.target === event.currentTarget) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleGeometrySurfacePointer(event.clientX, event.clientY);
+                  return;
+                }
+
                 if (pendingInsertTool && event.target === event.currentTarget) {
                   event.preventDefault();
                   event.stopPropagation();
@@ -6271,6 +7212,221 @@ export function MathWorkbook() {
                 <span>{`Clique ou touche la feuille pour placer ${pendingInsertLabel.toLowerCase()}.`}</span>
               </div>
             ) : null}
+
+            {geometryDraftIndicator ? (
+              <div
+                className="canvas-geometry-indicator"
+                style={{ left: `${geometryDraftIndicator.x}px`, top: `${geometryDraftIndicator.y}px` }}
+                aria-hidden="true"
+              >
+                {geometryDraftIndicator.label}
+              </div>
+            ) : null}
+
+            <svg
+              className={`canvas-geometry-layer ${activeGeometryTool ? "canvas-geometry-layer-passive" : ""}`}
+              width="100%"
+              height="100%"
+              viewBox={`0 0 ${getCanvasIntrinsicSize().width} ${getCanvasIntrinsicSize().height}`}
+              aria-hidden="true"
+            >
+              {state.geometry.map((shape) => {
+                const intrinsic = getCanvasIntrinsicSize();
+                const isSelected = selectedGeometryIds.includes(shape.id);
+                const bounds = getGeometryShapeBoundsPx(shape, intrinsic.width, intrinsic.height);
+                const strokeWidthPx = Math.max(1.2, mmToPx(shape.strokeWidthMm));
+
+                if (shape.kind === "point") {
+                  const x = mmToPx(shape.xMm);
+                  const y = mmToPx(shape.yMm);
+
+                  return (
+                    <g
+                      key={shape.id}
+                      ref={(node) => {
+                        geometryNodeRefs.current[shape.id] = node;
+                      }}
+                      className={`canvas-geometry-shape ${isSelected ? "canvas-geometry-shape-selected" : ""}`}
+                      onMouseDown={(event) => {
+                        if (activeGeometryTool) {
+                          return;
+                        }
+
+                        startDragging("geometry", shape.id, bounds.x, bounds.y, event);
+                      }}
+                      onTouchStart={(event) => {
+                        handleTouchDragStart("geometry", shape.id, bounds.x, bounds.y, event, Boolean(activeGeometryTool));
+                      }}
+                    >
+                      <circle className="canvas-geometry-hit" cx={x} cy={y} r={GEOMETRY_HIT_RADIUS_PX} />
+                      <circle className="canvas-geometry-point" cx={x} cy={y} r={mmToPx(GEOMETRY_POINT_RADIUS_MM)} fill={shape.color} />
+                      {isSelected ? <circle className="canvas-geometry-selection-ring" cx={x} cy={y} r={mmToPx(GEOMETRY_POINT_RADIUS_MM) + 6} /> : null}
+                      {shape.label ? (
+                        <text className="canvas-geometry-label" x={x + 10} y={y - 10} fill={shape.color}>
+                          {shape.label}
+                        </text>
+                      ) : null}
+                    </g>
+                  );
+                }
+
+                if (shape.kind === "circle") {
+                  const cx = mmToPx(shape.cxMm);
+                  const cy = mmToPx(shape.cyMm);
+                  const radius = mmToPx(shape.radiusMm);
+                  const measurement = isSelected ? getGeometrySelectionMeasurement(shape) : null;
+
+                  return (
+                    <g
+                      key={shape.id}
+                      ref={(node) => {
+                        geometryNodeRefs.current[shape.id] = node;
+                      }}
+                      className={`canvas-geometry-shape ${isSelected ? "canvas-geometry-shape-selected" : ""}`}
+                      onMouseDown={(event) => {
+                        if (activeGeometryTool) {
+                          return;
+                        }
+
+                        startDragging("geometry", shape.id, bounds.x, bounds.y, event);
+                      }}
+                      onTouchStart={(event) => {
+                        handleTouchDragStart("geometry", shape.id, bounds.x, bounds.y, event, Boolean(activeGeometryTool));
+                      }}
+                    >
+                      <circle className="canvas-geometry-hit" cx={cx} cy={cy} r={Math.max(radius + 8, GEOMETRY_HIT_RADIUS_PX)} />
+                      <circle className="canvas-geometry-circle" cx={cx} cy={cy} r={radius} stroke={shape.color} strokeWidth={strokeWidthPx} />
+                      <circle className="canvas-geometry-center" cx={cx} cy={cy} r={Math.max(1.2, strokeWidthPx)} fill={shape.color} />
+                      {isSelected ? <circle className="canvas-geometry-selection-ring" cx={cx} cy={cy} r={radius + 6} /> : null}
+                      {measurement ? (
+                        <text className="canvas-geometry-measure" x={cx} y={cy - radius - 14} textAnchor="middle">
+                          {measurement}
+                        </text>
+                      ) : null}
+                    </g>
+                  );
+                }
+
+                const rendered = getRenderedLinearGeometryPx(shape, intrinsic.width, intrinsic.height);
+
+                if (!rendered) {
+                  return null;
+                }
+
+                const measurement = isSelected ? getGeometrySelectionMeasurement(shape) : null;
+                const measurementX = (mmToPx(shape.axMm) + mmToPx(shape.bxMm)) / 2;
+                const measurementY = (mmToPx(shape.ayMm) + mmToPx(shape.byMm)) / 2 - 14;
+
+                return (
+                  <g
+                    key={shape.id}
+                    ref={(node) => {
+                      geometryNodeRefs.current[shape.id] = node;
+                    }}
+                    className={`canvas-geometry-shape ${isSelected ? "canvas-geometry-shape-selected" : ""}`}
+                    onMouseDown={(event) => {
+                      if (activeGeometryTool) {
+                        return;
+                      }
+
+                      startDragging("geometry", shape.id, bounds.x, bounds.y, event);
+                    }}
+                    onTouchStart={(event) => {
+                      handleTouchDragStart("geometry", shape.id, bounds.x, bounds.y, event, Boolean(activeGeometryTool));
+                    }}
+                    >
+                      <line className="canvas-geometry-hit" x1={rendered.x1} y1={rendered.y1} x2={rendered.x2} y2={rendered.y2} />
+                      <line className="canvas-geometry-line" x1={rendered.x1} y1={rendered.y1} x2={rendered.x2} y2={rendered.y2} stroke={shape.color} strokeWidth={strokeWidthPx} />
+                      {measurement ? (
+                        <text className="canvas-geometry-measure" x={measurementX} y={measurementY} textAnchor="middle">
+                          {measurement}
+                        </text>
+                      ) : null}
+                      {shape.kind === "segment" ? (
+                        <>
+                          <circle className="canvas-geometry-endpoint" cx={mmToPx(shape.axMm)} cy={mmToPx(shape.ayMm)} r={Math.max(2, strokeWidthPx + 0.6)} fill={shape.color} />
+                          <circle className="canvas-geometry-endpoint" cx={mmToPx(shape.bxMm)} cy={mmToPx(shape.byMm)} r={Math.max(2, strokeWidthPx + 0.6)} fill={shape.color} />
+                        </>
+                      ) : shape.kind === "ray" ? (
+                        <circle className="canvas-geometry-endpoint" cx={mmToPx(shape.axMm)} cy={mmToPx(shape.ayMm)} r={Math.max(2, strokeWidthPx + 0.6)} fill={shape.color} />
+                      ) : null}
+                    </g>
+                );
+              })}
+              {geometryMeasurement ? (
+                <>
+                  <line
+                    className="canvas-geometry-preview canvas-geometry-measure-line"
+                    x1={mmToPx(geometryMeasurement.start.xMm)}
+                    y1={mmToPx(geometryMeasurement.start.yMm)}
+                    x2={mmToPx(geometryMeasurement.end.xMm)}
+                    y2={mmToPx(geometryMeasurement.end.yMm)}
+                  />
+                  <text
+                    className="canvas-geometry-measure"
+                    x={(mmToPx(geometryMeasurement.start.xMm) + mmToPx(geometryMeasurement.end.xMm)) / 2}
+                    y={(mmToPx(geometryMeasurement.start.yMm) + mmToPx(geometryMeasurement.end.yMm)) / 2 - 14}
+                    textAnchor="middle"
+                  >
+                    {`${Math.round(
+                      Math.hypot(
+                        geometryMeasurement.end.xMm - geometryMeasurement.start.xMm,
+                        geometryMeasurement.end.yMm - geometryMeasurement.start.yMm
+                      )
+                    )} mm`}
+                  </text>
+                </>
+              ) : null}
+              {geometryDraft ? (
+                (() => {
+                  const intrinsic = getCanvasIntrinsicSize();
+
+                  if (geometryDraft.tool === "measure") {
+                    return (
+                      <line
+                        className="canvas-geometry-preview canvas-geometry-measure-line"
+                        x1={mmToPx(geometryDraft.start.xMm)}
+                        y1={mmToPx(geometryDraft.start.yMm)}
+                        x2={mmToPx(geometryDraft.current.xMm)}
+                        y2={mmToPx(geometryDraft.current.yMm)}
+                      />
+                    );
+                  }
+
+                  const previewShape = createGeometryShapeFromDraft(geometryDraft);
+
+                  if (!previewShape) {
+                    return null;
+                  }
+
+                  if (previewShape.kind === "point") {
+                    const x = mmToPx(previewShape.xMm);
+                    const y = mmToPx(previewShape.yMm);
+
+                    return <circle className="canvas-geometry-preview" cx={x} cy={y} r={mmToPx(GEOMETRY_POINT_RADIUS_MM)} />;
+                  }
+
+                  if (previewShape.kind === "circle") {
+                    return (
+                      <circle
+                        className="canvas-geometry-preview"
+                        cx={mmToPx(previewShape.cxMm)}
+                        cy={mmToPx(previewShape.cyMm)}
+                        r={mmToPx(previewShape.radiusMm)}
+                      />
+                    );
+                  }
+
+                  const rendered = getRenderedLinearGeometryPx(previewShape, intrinsic.width, intrinsic.height);
+
+                  if (!rendered) {
+                    return null;
+                  }
+
+                  return <line className="canvas-geometry-preview" x1={rendered.x1} y1={rendered.y1} x2={rendered.x2} y2={rendered.y2} />;
+                })()
+              ) : null}
+            </svg>
 
             {state.blocks.map((block) => (
               <article
