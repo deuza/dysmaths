@@ -1717,6 +1717,7 @@ export function MathWorkbook() {
   const [draftStroke, setDraftStroke] = useState<FreehandPoint[] | null>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuides>({ x: null, y: null });
+  const [selectedTextBoxMenuPosition, setSelectedTextBoxMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "png" | null>(null);
   const [isCanvasDropActive, setIsCanvasDropActive] = useState(false);
@@ -1756,6 +1757,7 @@ export function MathWorkbook() {
   const strokeNodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const pendingFocusTextBoxIdRef = useRef<string | null>(null);
   const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | HTMLTextAreaElement | null>>>({});
+  const selectedTextBoxMenuRef = useRef<HTMLDivElement | null>(null);
   const historyInitializedRef = useRef(false);
   const skipHistoryRef = useRef(false);
   const previousStateRef = useRef<WriterState>(cloneWriterState(createDefaultState()));
@@ -1846,30 +1848,65 @@ export function MathWorkbook() {
       y: Math.max(18, minTop - 52)
     };
   }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.strokes, state.symbols, state.textBoxes]);
-  const selectedTextBoxMenuPosition = useMemo(() => {
+  useEffect(() => {
     if (!selectedTextBox || editingTextBoxId === selectedTextBox.id || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
-      return null;
+      setSelectedTextBoxMenuPosition(null);
+      return;
     }
 
-    const node = textBoxNodeRefs.current[selectedTextBox.id];
+    const updateMenuPosition = () => {
+      const canvasNode = canvasRef.current;
+      const textBoxNode = textBoxNodeRefs.current[selectedTextBox.id];
 
-    if (!node) {
-      return null;
-    }
+      if (!canvasNode || !textBoxNode) {
+        setSelectedTextBoxMenuPosition(null);
+        return;
+      }
 
-    const canvasBounds = canvasRef.current.getBoundingClientRect();
-    const rect = node.getBoundingClientRect();
-    const menuOffset = 12;
-    const estimatedMenuHeight = 52;
-    const boxCenterX = rect.left - canvasBounds.left + rect.width / 2;
-    const aboveY = rect.top - canvasBounds.top - estimatedMenuHeight - menuOffset;
-    const belowY = rect.bottom - canvasBounds.top + menuOffset;
+      const menuNode = selectedTextBoxMenuRef.current;
+      const menuOffset = 12;
+      const horizontalGutter = 18;
+      const estimatedMenuWidth = menuNode?.offsetWidth ?? 236;
+      const estimatedMenuHeight = menuNode?.offsetHeight ?? 52;
+      const canvasWidth = canvasNode.clientWidth;
+      const canvasHeight = canvasNode.clientHeight;
+      const boxLeft = textBoxNode.offsetLeft;
+      const boxTop = textBoxNode.offsetTop;
+      const boxWidth = textBoxNode.offsetWidth;
+      const boxHeight = textBoxNode.offsetHeight;
+      const preferredCenterX = boxLeft + boxWidth / 2;
+      const minCenterX = horizontalGutter + estimatedMenuWidth / 2;
+      const maxCenterX = canvasWidth - horizontalGutter - estimatedMenuWidth / 2;
+      const x = minCenterX <= maxCenterX
+        ? Math.min(Math.max(preferredCenterX, minCenterX), maxCenterX)
+        : preferredCenterX;
+      const aboveY = boxTop - estimatedMenuHeight - menuOffset;
+      const belowY = boxTop + boxHeight + menuOffset;
+      const fitsAbove = aboveY >= horizontalGutter;
+      const fitsBelow = belowY + estimatedMenuHeight <= canvasHeight - horizontalGutter;
+      const y = fitsAbove || !fitsBelow
+        ? Math.max(horizontalGutter, aboveY)
+        : Math.min(Math.max(horizontalGutter, belowY), Math.max(horizontalGutter, canvasHeight - estimatedMenuHeight - horizontalGutter));
 
-    return {
-      x: boxCenterX,
-      y: aboveY >= 18 ? aboveY : belowY
+      setSelectedTextBoxMenuPosition((current) =>
+        current && current.x === x && current.y === y
+          ? current
+          : { x, y }
+      );
     };
-  }, [editingTextBoxId, isCanvasInteracting, selectedCount, selectedTextBox, selectionRect]);
+
+    updateMenuPosition();
+
+    const frameId = window.requestAnimationFrame(updateMenuPosition);
+    const resizeHandler = () => updateMenuPosition();
+
+    window.addEventListener("resize", resizeHandler);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", resizeHandler);
+    };
+  }, [editingTextBoxId, isCanvasInteracting, selectedCount, selectedTextBox, selectionRect, state.zoomPercent]);
   const pendingInsertLabel = useMemo(() => {
     if (!pendingInsertTool) {
       return "";
@@ -6208,6 +6245,7 @@ function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number
 
             {selectedTextBoxMenuPosition ? (
               <div
+                ref={selectedTextBoxMenuRef}
                 className="canvas-quick-menu canvas-text-format-menu"
                 style={{ left: `${selectedTextBoxMenuPosition.x}px`, top: `${selectedTextBoxMenuPosition.y}px` }}
                 onMouseDown={(event) => event.stopPropagation()}

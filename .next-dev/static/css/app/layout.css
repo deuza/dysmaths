@@ -3102,6 +3102,18 @@ input {
   font-weight: 800;
 }
 
+.canvas-quick-close,
+.canvas-quick-action {
+  -moz-appearance: none;
+       appearance: none;
+  -webkit-appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -moz-user-select: none;
+       user-select: none;
+  -webkit-user-select: none;
+}
+
 @media (max-width: 760px) {
   .canvas-quick-menu {
     grid-template-columns: repeat(3, minmax(0, max-content));
