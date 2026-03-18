@@ -2800,6 +2800,39 @@ input {
   stroke: rgba(31, 45, 61, 0.76);
 }
 
+.canvas-geometry-protractor-shell {
+  fill: rgba(255, 253, 249, 0.78);
+  stroke: rgba(31, 45, 61, 0.22);
+  stroke-width: 1.4;
+}
+
+.canvas-geometry-protractor-tick {
+  stroke: rgba(31, 45, 61, 0.34);
+  stroke-width: 1;
+}
+
+.canvas-geometry-protractor-ray {
+  stroke: rgba(31, 45, 61, 0.78);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.canvas-geometry-protractor-arc {
+  fill: none;
+  stroke: rgba(217, 119, 69, 0.92);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+.canvas-geometry-protractor-draft .canvas-geometry-protractor-shell {
+  fill: rgba(255, 248, 241, 0.7);
+}
+
+.canvas-geometry-protractor-draft .canvas-geometry-protractor-ray,
+.canvas-geometry-protractor-draft .canvas-geometry-protractor-arc {
+  stroke-dasharray: 8 6;
+}
+
 .canvas-geometry-selection-ring {
   stroke: rgba(217, 119, 69, 0.7);
   stroke-width: 2;

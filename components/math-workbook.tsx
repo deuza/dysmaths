@@ -22,7 +22,7 @@ type StudyMode = "college" | "lycee";
 type SheetStyle = "seyes" | "large-grid" | "small-grid" | "lined" | "blank";
 type StructuredTool = "fraction" | "addition" | "subtraction" | "multiplication" | "division" | "power" | "root";
 type UtilityMenu = "highlight" | null;
-type GeometryTool = "point" | "segment" | "line" | "ray" | "circle" | "measure";
+type GeometryTool = "point" | "segment" | "line" | "ray" | "circle" | "measure" | "protractor";
 
 type FractionBlock = {
   id: string;
@@ -383,6 +383,18 @@ type GeometryMeasurement = {
   end: GeometryPointCoordinate;
 };
 
+type GeometryProtractorDraft = {
+  firstPoint: GeometryPointCoordinate;
+  vertex: GeometryPointCoordinate | null;
+  current: GeometryPointCoordinate;
+};
+
+type GeometryAngleMeasurement = {
+  vertex: GeometryPointCoordinate;
+  baseline: GeometryPointCoordinate;
+  end: GeometryPointCoordinate;
+};
+
 type SnapGuides = {
   x: number | null;
   y: number | null;
@@ -563,7 +575,8 @@ const GEOMETRY_TOOL_OPTIONS = [
   { id: "line" as const, label: "Droite", hint: "Tracer une droite", glyph: "↔" },
   { id: "ray" as const, label: "Demi-droite", hint: "Tracer une demi-droite", glyph: "→" },
   { id: "circle" as const, label: "Cercle", hint: "Tracer un cercle", glyph: "◯" },
-  { id: "measure" as const, label: "Règle", hint: "Mesurer une distance", glyph: "cm" }
+  { id: "measure" as const, label: "Règle", hint: "Mesurer une distance", glyph: "cm" },
+  { id: "protractor" as const, label: "Rapporteur", hint: "Mesurer un angle", glyph: "∡" }
 ] as const;
 
 const STRUCTURED_TOOLS = [
@@ -1129,6 +1142,73 @@ function getGeometrySelectionMeasurement(shape: GeometryShape) {
   }
 
   return null;
+}
+
+function getGeometryAngleDegrees(vertex: GeometryPointCoordinate, baseline: GeometryPointCoordinate, end: GeometryPointCoordinate) {
+  const baselineAngle = Math.atan2(baseline.yMm - vertex.yMm, baseline.xMm - vertex.xMm);
+  const endAngle = Math.atan2(end.yMm - vertex.yMm, end.xMm - vertex.xMm);
+  let delta = Math.abs(((endAngle - baselineAngle) * 180) / Math.PI);
+
+  while (delta > 360) {
+    delta -= 360;
+  }
+
+  if (delta > 180) {
+    delta = 360 - delta;
+  }
+
+  return delta;
+}
+
+function getGeometrySignedAngleDelta(vertex: GeometryPointCoordinate, baseline: GeometryPointCoordinate, end: GeometryPointCoordinate) {
+  const baselineAngle = Math.atan2(baseline.yMm - vertex.yMm, baseline.xMm - vertex.xMm);
+  const endAngle = Math.atan2(end.yMm - vertex.yMm, end.xMm - vertex.xMm);
+  let delta = endAngle - baselineAngle;
+
+  while (delta <= -Math.PI) {
+    delta += Math.PI * 2;
+  }
+
+  while (delta > Math.PI) {
+    delta -= Math.PI * 2;
+  }
+
+  return delta;
+}
+
+function getGeometryProtractorRadiusPx(vertex: GeometryPointCoordinate, baseline: GeometryPointCoordinate, end: GeometryPointCoordinate) {
+  const baselineLength = Math.hypot(mmToPx(baseline.xMm - vertex.xMm), mmToPx(baseline.yMm - vertex.yMm));
+  const endLength = Math.hypot(mmToPx(end.xMm - vertex.xMm), mmToPx(end.yMm - vertex.yMm));
+
+  return Math.max(42, Math.min(96, Math.min(baselineLength, endLength) * 0.72));
+}
+
+function getGeometryPolarPoint(vertex: GeometryPointCoordinate, radiusPx: number, angle: number) {
+  return {
+    x: mmToPx(vertex.xMm) + Math.cos(angle) * radiusPx,
+    y: mmToPx(vertex.yMm) + Math.sin(angle) * radiusPx
+  };
+}
+
+function getGeometryProtractorPaths(vertex: GeometryPointCoordinate, baseline: GeometryPointCoordinate, end: GeometryPointCoordinate) {
+  const baselineAngle = Math.atan2(baseline.yMm - vertex.yMm, baseline.xMm - vertex.xMm);
+  const delta = getGeometrySignedAngleDelta(vertex, baseline, end);
+  const radius = getGeometryProtractorRadiusPx(vertex, baseline, end);
+  const outerStart = getGeometryPolarPoint(vertex, radius, baselineAngle);
+  const outerEnd = getGeometryPolarPoint(vertex, radius, baselineAngle + (delta >= 0 ? Math.PI : -Math.PI));
+  const arcEnd = getGeometryPolarPoint(vertex, radius, baselineAngle + delta);
+  const largeArcFlag = Math.abs(delta) > Math.PI ? 1 : 0;
+  const sweepFlag = delta >= 0 ? 1 : 0;
+  const semiSweepFlag = delta >= 0 ? 1 : 0;
+  const centerX = mmToPx(vertex.xMm);
+  const centerY = mmToPx(vertex.yMm);
+
+  return {
+    radius,
+    baselineAngle,
+    protractorPath: `M ${centerX} ${centerY} L ${outerStart.x} ${outerStart.y} A ${radius} ${radius} 0 0 ${semiSweepFlag} ${outerEnd.x} ${outerEnd.y} Z`,
+    measuredArcPath: `M ${getGeometryPolarPoint(vertex, radius - 8, baselineAngle).x} ${getGeometryPolarPoint(vertex, radius - 8, baselineAngle).y} A ${radius - 8} ${radius - 8} 0 ${largeArcFlag} ${sweepFlag} ${arcEnd.x} ${arcEnd.y}`
+  };
 }
 
 function cloneWriterState(value: WriterState) {
@@ -2090,6 +2170,8 @@ export function MathWorkbook() {
   const [activeGeometryTool, setActiveGeometryTool] = useState<GeometryTool | null>(null);
   const [geometryDraft, setGeometryDraft] = useState<GeometryDraft | null>(null);
   const [geometryMeasurement, setGeometryMeasurement] = useState<GeometryMeasurement | null>(null);
+  const [geometryProtractorDraft, setGeometryProtractorDraft] = useState<GeometryProtractorDraft | null>(null);
+  const [geometryAngleMeasurement, setGeometryAngleMeasurement] = useState<GeometryAngleMeasurement | null>(null);
   const [pendingInsertTool, setPendingInsertTool] = useState<PendingInsertTool>(null);
   const [insertCursorPreview, setInsertCursorPreview] = useState<InsertCursorPreview>({ x: 0, y: 0, visible: false });
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
@@ -2132,6 +2214,7 @@ export function MathWorkbook() {
   const advancedToolRef = useRef<AdvancedTool>(null);
   const activeGeometryToolRef = useRef<GeometryTool | null>(null);
   const geometryDraftRef = useRef<GeometryDraft | null>(null);
+  const geometryProtractorDraftRef = useRef<GeometryProtractorDraft | null>(null);
   const editingBlockRef = useRef<EditingBlockState>(null);
   const recentInlineBlockInteractionRef = useRef<{ blockId: string; timeStamp: number } | null>(null);
   const symbolResizeRef = useRef<SymbolResizeState | null>(null);
@@ -2219,6 +2302,18 @@ export function MathWorkbook() {
       return "Trace des figures précises en gardant l’échelle de la feuille pour l’impression.";
     }
 
+    if (activeGeometryTool === "protractor") {
+      if (!geometryProtractorDraft) {
+        return "Clique un point sur le premier côté de l’angle.";
+      }
+
+      if (!geometryProtractorDraft.vertex) {
+        return "Clique ensuite le sommet de l’angle.";
+      }
+
+      return "Clique un point sur le second côté pour figer la mesure.";
+    }
+
     if (geometryDraft) {
       if (activeGeometryTool === "measure") {
         return "Clique un second point pour figer la mesure.";
@@ -2238,8 +2333,19 @@ export function MathWorkbook() {
       : activeGeometryTool === "circle"
         ? "Clique la feuille pour placer le centre du cercle."
         : "Clique la feuille pour placer le premier point.";
-  }, [activeGeometryTool, geometryDraft]);
+  }, [activeGeometryTool, geometryDraft, geometryProtractorDraft]);
   const geometryDraftIndicator = useMemo<GeometryDraftIndicator | null>(() => {
+    if (activeGeometryTool === "protractor" && geometryProtractorDraft?.vertex) {
+      const currentX = mmToPx(geometryProtractorDraft.current.xMm);
+      const currentY = mmToPx(geometryProtractorDraft.current.yMm);
+
+      return {
+        x: currentX,
+        y: currentY,
+        label: `${Math.round(getGeometryAngleDegrees(geometryProtractorDraft.vertex, geometryProtractorDraft.firstPoint, geometryProtractorDraft.current))}°`
+      };
+    }
+
     if (!geometryDraft) {
       return null;
     }
@@ -2261,7 +2367,7 @@ export function MathWorkbook() {
       y: currentY,
       label: `${Math.max(0, Math.round(lengthMm))} mm`
     };
-  }, [geometryDraft]);
+  }, [activeGeometryTool, geometryDraft, geometryProtractorDraft]);
   const selectedHighlightColor = useMemo(() => {
     const selectedItems = [
       ...state.blocks.filter((block) => selectedBlockIds.includes(block.id)).map((block) => block.highlightColor ?? ""),
@@ -2442,6 +2548,10 @@ export function MathWorkbook() {
   }, [geometryDraft]);
 
   useEffect(() => {
+    geometryProtractorDraftRef.current = geometryProtractorDraft;
+  }, [geometryProtractorDraft]);
+
+  useEffect(() => {
     editingBlockRef.current = editingBlock;
   }, [editingBlock]);
 
@@ -2534,6 +2644,8 @@ export function MathWorkbook() {
         if (activeGeometryToolRef.current) {
           event.preventDefault();
           setActiveGeometryTool(null);
+          setGeometryAngleMeasurement(null);
+          setGeometryMeasurement(null);
           setSnapGuides({ x: null, y: null });
           return;
         }
@@ -2714,6 +2826,20 @@ export function MathWorkbook() {
     function handlePointerMove(clientX: number, clientY: number) {
       if (symbolResizeRef.current) {
         updateSymbolResize(clientX, clientY);
+        return;
+      }
+
+      if (geometryProtractorDraftRef.current && !dragRef.current && !pendingSelectionRef.current && !isDrawingStrokeRef.current) {
+        const snappedPoint = getGeometrySnapPoint(clientX, clientY);
+        setGeometryProtractorDraft((current) =>
+          current
+            ? {
+                ...current,
+                current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+              }
+            : current
+        );
+        setSnapGuides(snappedPoint.guides);
         return;
       }
 
@@ -2905,7 +3031,7 @@ export function MathWorkbook() {
     }
 
     function handleTouchMove(event: TouchEvent) {
-      if (!isDrawingStrokeRef.current && !pendingSelectionRef.current && !dragRef.current && !symbolResizeRef.current && !geometryDraftRef.current) {
+      if (!isDrawingStrokeRef.current && !pendingSelectionRef.current && !dragRef.current && !symbolResizeRef.current && !geometryDraftRef.current && !geometryProtractorDraftRef.current) {
         return;
       }
 
@@ -3542,6 +3668,10 @@ export function MathWorkbook() {
       return null;
     }
 
+    if (draft.tool !== "segment" && draft.tool !== "line" && draft.tool !== "ray") {
+      return null;
+    }
+
     return {
       id: createId("geometry"),
       type: "geometry",
@@ -3557,6 +3687,7 @@ export function MathWorkbook() {
 
   function clearGeometryDraftState() {
     setGeometryDraft(null);
+    setGeometryProtractorDraft(null);
     setSnapGuides({ x: null, y: null });
   }
 
@@ -3663,10 +3794,13 @@ export function MathWorkbook() {
       if (!nextValue) {
         clearGeometryDraftState();
         setGeometryMeasurement(null);
+        setGeometryAngleMeasurement(null);
       } else {
         setGeometryDraft(null);
+        setGeometryProtractorDraft(null);
         setSnapGuides({ x: null, y: null });
         setGeometryMeasurement(null);
+        setGeometryAngleMeasurement(null);
         collapseToolsPanelForTablet();
       }
 
@@ -3684,8 +3818,40 @@ export function MathWorkbook() {
     const snappedPoint = getGeometrySnapPoint(clientX, clientY);
     setSnapGuides(snappedPoint.guides);
 
+    if (tool === "protractor") {
+      setGeometryMeasurement(null);
+      const currentDraft = geometryProtractorDraftRef.current;
+
+      if (!currentDraft) {
+        setGeometryProtractorDraft({
+          firstPoint: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm },
+          vertex: null,
+          current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+        });
+        return true;
+      }
+
+      if (!currentDraft.vertex) {
+        setGeometryProtractorDraft({
+          ...currentDraft,
+          vertex: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm },
+          current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+        });
+        return true;
+      }
+
+      setGeometryAngleMeasurement({
+        vertex: currentDraft.vertex,
+        baseline: currentDraft.firstPoint,
+        end: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
+      });
+      clearGeometryDraftState();
+      return true;
+    }
+
     if (tool === "point") {
       setGeometryMeasurement(null);
+      setGeometryAngleMeasurement(null);
       const pointShape = createGeometryShapeFromDraft({
         tool,
         start: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm },
@@ -3705,6 +3871,8 @@ export function MathWorkbook() {
       if (tool === "measure") {
         setGeometryMeasurement(null);
       }
+
+      setGeometryAngleMeasurement(null);
 
       setGeometryDraft({
         tool,
@@ -3984,6 +4152,7 @@ export function MathWorkbook() {
     setActiveGeometryTool(null);
     clearGeometryDraftState();
     setGeometryMeasurement(null);
+    setGeometryAngleMeasurement(null);
     setPendingInsertTool((current) => {
       let nextValue: PendingInsertTool = nextTool;
 
@@ -4666,6 +4835,7 @@ export function MathWorkbook() {
     setActiveGeometryTool(null);
     clearGeometryDraftState();
     setGeometryMeasurement(null);
+    setGeometryAngleMeasurement(null);
     setState((current) => ({
       ...current,
       activeHighlightColor: resolvedHighlight
@@ -4929,6 +5099,7 @@ export function MathWorkbook() {
     setEditingTextBoxId(null);
     setDraftStroke(null);
     setGeometryMeasurement(null);
+    setGeometryAngleMeasurement(null);
     isDrawingStrokeRef.current = false;
     draftStrokeRef.current = [];
     draftStrokeStyleRef.current = { color: stateRef.current.activeColor, width: 2.6, opacity: 1 };
@@ -6586,6 +6757,7 @@ export function MathWorkbook() {
     setActiveGeometryTool(null);
     clearGeometryDraftState();
     setGeometryMeasurement(null);
+    setGeometryAngleMeasurement(null);
     setPendingInsertTool(null);
     setAdvancedTool((current) => {
       const nextValue = current === tool ? null : tool;
@@ -6679,6 +6851,52 @@ export function MathWorkbook() {
     }));
     selectSingleSymbol(symbol.id);
     setCanvasQuickMenu(null);
+  }
+
+  function renderProtractorOverlay(
+    vertex: GeometryPointCoordinate,
+    baseline: GeometryPointCoordinate,
+    end: GeometryPointCoordinate,
+    tone: "draft" | "final" = "final"
+  ) {
+    const { radius, baselineAngle, protractorPath, measuredArcPath } = getGeometryProtractorPaths(vertex, baseline, end);
+    const delta = getGeometrySignedAngleDelta(vertex, baseline, end);
+    const stepDirection = delta >= 0 ? 1 : -1;
+    const degreeValue = Math.round(getGeometryAngleDegrees(vertex, baseline, end));
+    const centerX = mmToPx(vertex.xMm);
+    const centerY = mmToPx(vertex.yMm);
+    const baselineX = mmToPx(baseline.xMm);
+    const baselineY = mmToPx(baseline.yMm);
+    const endX = mmToPx(end.xMm);
+    const endY = mmToPx(end.yMm);
+
+    return (
+      <g className={`canvas-geometry-protractor canvas-geometry-protractor-${tone}`}>
+        <path className="canvas-geometry-protractor-shell" d={protractorPath} />
+        {Array.from({ length: 19 }, (_, index) => {
+          const angle = baselineAngle + ((Math.PI / 18) * index * stepDirection);
+          const outer = getGeometryPolarPoint(vertex, radius - 2, angle);
+          const inner = getGeometryPolarPoint(vertex, index % 3 === 0 ? radius - 14 : radius - 8, angle);
+
+          return (
+            <line
+              key={`tick-${tone}-${index}`}
+              className="canvas-geometry-protractor-tick"
+              x1={inner.x}
+              y1={inner.y}
+              x2={outer.x}
+              y2={outer.y}
+            />
+          );
+        })}
+        <line className="canvas-geometry-protractor-ray" x1={centerX} y1={centerY} x2={baselineX} y2={baselineY} />
+        <line className="canvas-geometry-protractor-ray" x1={centerX} y1={centerY} x2={endX} y2={endY} />
+        <path className="canvas-geometry-protractor-arc" d={measuredArcPath} />
+        <text className="canvas-geometry-measure" x={centerX} y={centerY - radius - 18} textAnchor="middle">
+          {`${degreeValue}°`}
+        </text>
+      </g>
+    );
   }
 
   return (
@@ -7377,6 +7595,7 @@ export function MathWorkbook() {
                   </text>
                 </>
               ) : null}
+              {geometryAngleMeasurement ? renderProtractorOverlay(geometryAngleMeasurement.vertex, geometryAngleMeasurement.baseline, geometryAngleMeasurement.end, "final") : null}
               {geometryDraft ? (
                 (() => {
                   const intrinsic = getCanvasIntrinsicSize();
@@ -7426,6 +7645,9 @@ export function MathWorkbook() {
                   return <line className="canvas-geometry-preview" x1={rendered.x1} y1={rendered.y1} x2={rendered.x2} y2={rendered.y2} />;
                 })()
               ) : null}
+              {geometryProtractorDraft?.vertex
+                ? renderProtractorOverlay(geometryProtractorDraft.vertex, geometryProtractorDraft.firstPoint, geometryProtractorDraft.current, "draft")
+                : null}
             </svg>
 
             {state.blocks.map((block) => (
