@@ -4213,7 +4213,7 @@ export function MathWorkbook() {
       return;
     }
 
-    const spacing = 12;
+    const spacing = 0;
     const measuredItems = [
       ...state.blocks
         .filter((block) => selectedBlockIds.includes(block.id))
