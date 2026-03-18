@@ -820,8 +820,8 @@ input {
 
 .color-chip {
   position: relative;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 1.67rem;
+  height: 1.67rem;
   padding: 0;
   border: none;
   border-radius: 999px;
@@ -840,7 +840,7 @@ input {
 .color-chip::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -3px;
   border: 2px solid transparent;
   border-radius: inherit;
   pointer-events: none;
