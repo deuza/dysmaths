@@ -1777,7 +1777,7 @@ export function MathWorkbook() {
   const [draftStroke, setDraftStroke] = useState<FreehandPoint[] | null>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuides>({ x: null, y: null });
-  const [selectedTextBoxMenuPosition, setSelectedTextBoxMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [selectedTextBoxMenuPosition, setSelectedTextBoxMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "png" | null>(null);
   const [isCanvasDropActive, setIsCanvasDropActive] = useState(false);
@@ -1904,11 +1904,23 @@ export function MathWorkbook() {
     const minLeft = Math.min(...bounds.map((rect) => rect.left - canvasBounds.left));
     const maxRight = Math.max(...bounds.map((rect) => rect.right - canvasBounds.left));
     const minTop = Math.min(...bounds.map((rect) => rect.top - canvasBounds.top));
+    const maxBottom = Math.max(...bounds.map((rect) => rect.bottom - canvasBounds.top));
     const centerX = (minLeft + maxRight) / 2;
+    const menuWidth = 124;
+    const menuHeight = 52;
+    const horizontalGutter = 18;
+    const menuOffset = 12;
+    const minCenterX = horizontalGutter + menuWidth / 2;
+    const maxCenterX = canvasBounds.width - horizontalGutter - menuWidth / 2;
+    const x = minCenterX <= maxCenterX ? Math.min(Math.max(centerX, minCenterX), maxCenterX) : centerX;
+    const aboveY = minTop - menuHeight - menuOffset;
+    const belowY = maxBottom + menuOffset;
+    const placement: "above" | "below" = aboveY >= horizontalGutter ? "above" : "below";
 
     return {
-      x: centerX,
-      y: Math.max(18, minTop - 52)
+      x,
+      y: placement === "above" ? Math.max(18, minTop - menuOffset) : Math.max(18, belowY),
+      placement
     };
   }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.strokes, state.symbols, state.textBoxes]);
   useEffect(() => {
@@ -1937,6 +1949,7 @@ export function MathWorkbook() {
       const boxTop = textBoxNode.offsetTop;
       const boxWidth = textBoxNode.offsetWidth;
       const boxHeight = textBoxNode.offsetHeight;
+      const boxBottom = boxTop + boxHeight;
       const preferredCenterX = boxLeft + boxWidth / 2;
       const minCenterX = horizontalGutter + estimatedMenuWidth / 2;
       const maxCenterX = canvasWidth - horizontalGutter - estimatedMenuWidth / 2;
@@ -1944,17 +1957,16 @@ export function MathWorkbook() {
         ? Math.min(Math.max(preferredCenterX, minCenterX), maxCenterX)
         : preferredCenterX;
       const aboveY = boxTop - estimatedMenuHeight - menuOffset;
-      const belowY = boxTop + boxHeight + menuOffset;
+      const belowY = boxBottom + menuOffset;
       const fitsAbove = aboveY >= horizontalGutter;
       const fitsBelow = belowY + estimatedMenuHeight <= canvasHeight - horizontalGutter;
-      const y = fitsAbove || !fitsBelow
-        ? Math.max(horizontalGutter, aboveY)
-        : Math.min(Math.max(horizontalGutter, belowY), Math.max(horizontalGutter, canvasHeight - estimatedMenuHeight - horizontalGutter));
+      const placement: "above" | "below" = fitsAbove || !fitsBelow ? "above" : "below";
+      const y = placement === "above" ? Math.max(horizontalGutter, boxTop - menuOffset) : Math.min(Math.max(horizontalGutter, belowY), Math.max(horizontalGutter, canvasHeight - horizontalGutter));
 
       setSelectedTextBoxMenuPosition((current) =>
-        current && current.x === x && current.y === y
+        current && current.x === x && current.y === y && current.placement === placement
           ? current
-          : { x, y }
+          : { x, y, placement }
       );
     };
 
@@ -6576,6 +6588,7 @@ export function MathWorkbook() {
               <div
                 className="canvas-quick-menu canvas-selection-menu"
                 style={{ left: `${multiSelectionMenuPosition.x}px`, top: `${multiSelectionMenuPosition.y}px` }}
+                data-placement={multiSelectionMenuPosition.placement}
                 onMouseDown={(event) => event.stopPropagation()}
               >
                 <button
@@ -6609,6 +6622,7 @@ export function MathWorkbook() {
                 ref={selectedTextBoxMenuRef}
                 className="canvas-quick-menu canvas-text-format-menu"
                 style={{ left: `${selectedTextBoxMenuPosition.x}px`, top: `${selectedTextBoxMenuPosition.y}px` }}
+                data-placement={selectedTextBoxMenuPosition.placement}
                 onMouseDown={(event) => event.stopPropagation()}
               >
                 <button

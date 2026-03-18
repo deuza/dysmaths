@@ -2979,15 +2979,23 @@ input {
 }
 
 .canvas-selection-menu {
-  transform: translateX(-50%);
   grid-template-columns: repeat(2, max-content);
   padding: 5px;
 }
 
 .canvas-text-format-menu {
-  transform: translateX(-50%);
   grid-template-columns: repeat(5, max-content);
   padding: 8px;
+}
+
+.canvas-selection-menu[data-placement="above"],
+.canvas-text-format-menu[data-placement="above"] {
+  transform: translateX(-50%) translateY(-100%);
+}
+
+.canvas-selection-menu[data-placement="below"],
+.canvas-text-format-menu[data-placement="below"] {
+  transform: translateX(-50%);
 }
 
 .canvas-selection-action {
