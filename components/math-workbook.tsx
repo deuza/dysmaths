@@ -6431,6 +6431,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         const targetCellIndex = line === activeLine ? getCurrentLineTargetIndex(line) : undefined;
         const targetOffset = typeof targetCellIndex === "number" ? columns - 1 - targetCellIndex : 0;
         const showCarryRow = hasArithmeticCarryCells(carryCells) || activeCarryMatch !== null;
+        const allowCarryCreation = line === "top";
 
         if (showCarryRow) {
           return (
@@ -6539,7 +6540,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
           );
         }
 
-        if (isStrikeModeActive) {
+        if (isStrikeModeActive || !allowCarryCreation) {
           return null;
         }
 
