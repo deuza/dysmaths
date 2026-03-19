@@ -1641,32 +1641,6 @@ function normalizeDivisionDecimalInput(value: string) {
   return `${normalized.slice(0, firstCommaIndex + 1)}${normalized.slice(firstCommaIndex + 1).replace(/,/g, "")}`;
 }
 
-function getDecimalPlaces(value: string) {
-  const normalized = normalizeDivisionDecimalInput(value);
-  const firstCommaIndex = normalized.indexOf(",");
-
-  if (firstCommaIndex === -1) {
-    return null;
-  }
-
-  return Array.from(normalized).length - firstCommaIndex - 1;
-}
-
-function applyDecimalCommaToAlignedValue(value: string, decimalPlaces: number) {
-  const normalized = normalizeDivisionDecimalInput(value);
-  const digits = normalized.replace(/,/g, "");
-
-  if (digits.length === 0) {
-    return decimalPlaces === 0 ? "," : `,${"0".repeat(decimalPlaces)}`;
-  }
-
-  if (decimalPlaces === 0) {
-    return `${digits},`;
-  }
-
-  return `${digits},${"0".repeat(decimalPlaces)}`;
-}
-
 function getDivisionMaxWorkLines(quotient: string) {
   return Math.max(8, getDivisionQuotientDigits(quotient) * 2 + 1);
 }
@@ -1867,57 +1841,6 @@ function getStrokeStyleForTool(tool: AdvancedTool, activeColor: string, activeHi
 
 function hasArithmeticCarryCells(cells: string[]) {
   return cells.some((cell) => cell.trim().length > 0);
-}
-
-function propagateArithmeticDecimalComma(
-  block: AdditionBlock | SubtractionBlock | MultiplicationBlock,
-  sourceField: ArithmeticLineField,
-  nextValue: string
-) {
-  const decimalPlaces = getDecimalPlaces(nextValue);
-
-  if (decimalPlaces === null) {
-    return block;
-  }
-
-  const orderedFields: ArithmeticLineField[] = ["top", "bottom", "result"];
-  const sourceIndex = orderedFields.indexOf(sourceField);
-
-  if (sourceIndex === -1) {
-    return block;
-  }
-
-  const nextBlock = { ...block };
-
-  for (let index = sourceIndex + 1; index < orderedFields.length; index += 1) {
-    const field = orderedFields[index];
-    nextBlock[field] = applyDecimalCommaToAlignedValue(nextBlock[field], decimalPlaces);
-  }
-
-  return nextBlock;
-}
-
-function propagateDivisionDecimalComma(block: DivisionBlock, sourceField: string, nextValue: string) {
-  const decimalPlaces = getDecimalPlaces(nextValue);
-
-  if (decimalPlaces === null) {
-    return block;
-  }
-
-  if (sourceField !== "dividend" && !sourceField.startsWith("work:")) {
-    return block;
-  }
-
-  const workLines = getDivisionWorkLines(block.work);
-  const sourceLineIndex = sourceField === "dividend" ? -1 : Number.parseInt(sourceField.slice(5), 10);
-  const nextLines = workLines.map((line, index) =>
-    index > sourceLineIndex ? applyDecimalCommaToAlignedValue(line, decimalPlaces) : line
-  );
-
-  return {
-    ...block,
-    work: serializeDivisionWorkLines(nextLines)
-  };
 }
 
 function getArithmeticCarryCells(block: AdditionBlock | SubtractionBlock | MultiplicationBlock, line: ArithmeticLineField) {
@@ -5284,13 +5207,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     setState((current) => ({
       ...current,
       blocks: current.blocks.map((block) =>
-        block.id === blockId
-          ? isColumnArithmeticBlock(block) && (key === "top" || key === "bottom" || key === "result")
-            ? (propagateArithmeticDecimalComma({ ...block, [key]: value } as AdditionBlock | SubtractionBlock | MultiplicationBlock, key, value) as MathBlock)
-            : block.type === "division" && (key === "dividend" || key === "divisor" || key === "quotient")
-              ? (propagateDivisionDecimalComma({ ...block, [key]: value }, key, value) as MathBlock)
-              : ({ ...block, [key]: value } as MathBlock)
-          : block
+        block.id === blockId ? ({ ...block, [key]: value } as MathBlock) : block
       )
     }));
   }
@@ -6801,7 +6718,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
                         ...current,
                         blocks: current.blocks.map((entry) =>
                           entry.id === block.id && entry.type === "division"
-                            ? (propagateDivisionDecimalComma({ ...entry, work: setDivisionWorkLine(entry.work, index, nextValue) }, `work:${index}`, nextValue) as MathBlock)
+                            ? ({ ...entry, work: setDivisionWorkLine(entry.work, index, nextValue) } as MathBlock)
                             : entry
                         )
                       }))
