@@ -1411,8 +1411,10 @@ input {
 }
 
 .addition-number-display {
+  position: relative;
+  z-index: 2;
   min-width: 100%;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .addition-number-display-strike-mode {
@@ -1479,6 +1481,7 @@ input {
   letter-spacing: 0;
   caret-color: currentColor;
   -webkit-text-fill-color: transparent;
+  pointer-events: none;
 }
 
 .addition-number-input-strike-mode {
@@ -1712,18 +1715,18 @@ input {
 
 .addition-row-preview.division-cell-row,
 .division-row-preview.division-cell-row {
-  display: inline-flex;
-  grid-template-columns: none;
-  gap: 0.04rem;
-  width: auto;
+  display: grid;
+  grid-template-columns: repeat(var(--division-columns), 0.92rem);
+  gap: 0.08rem;
+  width: max-content;
 }
 
 .addition-row-preview .division-cell,
 .division-row-preview .division-cell {
-  width: auto;
-  min-width: 0;
-  height: auto;
-  min-height: 0;
+  width: 0.92rem;
+  min-width: 0.92rem;
+  height: var(--division-cell-size);
+  min-height: var(--division-cell-size);
   padding: 0;
   font-weight: 400;
 }
@@ -1873,8 +1876,10 @@ input {
 }
 
 .division-number-field-display {
+  position: relative;
+  z-index: 2;
   min-width: 100%;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .division-number-field-display-strike-mode {
@@ -1908,6 +1913,7 @@ input {
   letter-spacing: 0;
   caret-color: currentColor;
   -webkit-text-fill-color: transparent;
+  pointer-events: none;
 }
 
 .division-dividend-field:focus {
