@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import {getLocale} from "next-intl/server";
 import {PwaRegistration} from "@/components/pwa-registration";
 import "./globals.css";
 
@@ -22,13 +23,15 @@ export const viewport: Viewport = {
   themeColor: "#1f2d3d"
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body>
         {children}
         <PwaRegistration />

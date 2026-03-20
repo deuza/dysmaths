@@ -15,7 +15,7 @@ export function GET() {
 const BUILD_ID = ${JSON.stringify(buildId)};
 const STATIC_CACHE = "dysmaths-static-" + BUILD_ID;
 const RUNTIME_CACHE = "dysmaths-runtime-" + BUILD_ID;
-const PRECACHE_URLS = ["/", "/en", "/fr", "/es", "/manifest.webmanifest", "/icon.svg"];
+const PRECACHE_URLS = ["/en", "/fr", "/es", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -49,6 +49,36 @@ function isCacheableAsset(requestUrl) {
     requestUrl.pathname === "/icon.svg";
 }
 
+function getPreferredLocale(request) {
+  const acceptLanguage = request.headers.get("accept-language") || "";
+  const orderedLocales = acceptLanguage
+    .split(",")
+    .map((entry) => {
+      const [tag, qualityPart] = entry.trim().split(";q=");
+      return {
+        tag: tag.toLowerCase(),
+        quality: qualityPart ? Number(qualityPart) : 1
+      };
+    })
+    .sort((left, right) => right.quality - left.quality);
+
+  for (const {tag} of orderedLocales) {
+    if (tag.startsWith("fr")) {
+      return "fr";
+    }
+
+    if (tag.startsWith("es")) {
+      return "es";
+    }
+
+    if (tag.startsWith("en")) {
+      return "en";
+    }
+  }
+
+  return "en";
+}
+
 async function cacheFirst(request) {
   const cache = await caches.open(RUNTIME_CACHE);
   const cached = await cache.match(request);
@@ -65,23 +95,19 @@ async function cacheFirst(request) {
 
 async function networkFirstPage(request) {
   const cache = await caches.open(RUNTIME_CACHE);
+  const url = new URL(request.url);
+  const localeMatch = url.pathname.match(/^\\/(en|fr|es)(?:\\/|$)/);
+  const preferredLocale = localeMatch ? localeMatch[1] : getPreferredLocale(request);
 
   try {
     const response = await fetch(request);
-    if (response && response.ok) {
+    if (response && response.ok && url.pathname !== "/") {
       cache.put(request, response.clone());
     }
     return response;
   } catch {
-    const cached = await cache.match(request);
-    if (cached) {
-      return cached;
-    }
-
-    const url = new URL(request.url);
-    const localeMatch = url.pathname.match(/^\\/(en|fr|es)(?:\\/|$)/);
-    const localePath = localeMatch ? "/" + localeMatch[1] : "/en";
-    return (await caches.match(localePath)) || (await caches.match("/en")) || Response.error();
+    const fallbackPath = "/" + preferredLocale;
+    return (await caches.match(fallbackPath)) || (await caches.match("/en")) || Response.error();
   }
 }
 
