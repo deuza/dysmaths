@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Dysmaths - l'écriture mathématique facile pour les dysgraphiques et dyspraxiques",
   description:
-    "Une application Next.js pensée pour permettre aux collégiens et lycéens de rédiger, sauvegarder et imprimer leurs formules mathématiques."
+    "Une application pensée pour aider les collégiens et lycéens à rédiger, sauvegarder et imprimer leurs formules mathématiques."
 };
 
 export default function RootLayout({
