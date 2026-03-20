@@ -1632,7 +1632,7 @@ function getDefaultWidth(type: MathBlock["type"]) {
 }
 
 function getDivisionWorkLines(work: string) {
-  const lines = work.split("\n").map((line) => line.replace(/\s+$/g, ""));
+  const lines = work.split("\n");
   return lines.length > 0 ? lines : [""];
 }
 
@@ -1682,7 +1682,7 @@ function setDivisionWorkLine(work: string, lineIndex: number, value: string) {
 
   lines[lineIndex] = value;
 
-  while (lines.length > 1 && lines[lines.length - 1].trim().length === 0) {
+  while (lines.length > 1 && lines[lines.length - 1] === "") {
     lines.pop();
   }
 
@@ -1692,7 +1692,7 @@ function setDivisionWorkLine(work: string, lineIndex: number, value: string) {
 function serializeDivisionWorkLines(lines: string[]) {
   const nextLines = [...lines];
 
-  while (nextLines.length > 1 && nextLines[nextLines.length - 1].trim().length === 0) {
+  while (nextLines.length > 1 && nextLines[nextLines.length - 1] === "") {
     nextLines.pop();
   }
 
@@ -5326,7 +5326,11 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     setState((current) => ({
       ...current,
       blocks: current.blocks.map((block) =>
-        block.id === blockId ? ({ ...block, [key]: value } as MathBlock) : block
+        block.id === blockId
+          ? block.type === "division" && key.startsWith("work:")
+            ? ({ ...block, work: setDivisionWorkLine(block.work, Number.parseInt(key.slice(5), 10), value) } as MathBlock)
+            : ({ ...block, [key]: value } as MathBlock)
+          : block
       )
     }));
   }
@@ -5378,7 +5382,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
   }
 
   function focusInlineBlockField(blockId: string, field: string, selection?: { start: number; end: number }) {
-    window.setTimeout(() => {
+    const applySelection = (attempt = 0) => {
       const input = blockInputRefs.current[blockId]?.[field];
 
       if (!input) {
@@ -5390,9 +5394,16 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
       }
 
       if (selection) {
+        if (attempt < 4 && input.value.length < selection.end) {
+          window.requestAnimationFrame(() => applySelection(attempt + 1));
+          return;
+        }
+
         input.setSelectionRange(selection.start, selection.end);
       }
-    }, 0);
+    };
+
+    window.requestAnimationFrame(() => applySelection());
   }
 
   function handleInlineNumericDeleteKey(
