@@ -1,10 +1,25 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import {PwaRegistration} from "@/components/pwa-registration";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Dysmaths",
-  description: "Multilingual math writing workspace."
+  description: "Multilingual math writing workspace.",
+  manifest: "/manifest.webmanifest",
+  applicationName: "Dysmaths",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Dysmaths"
+  },
+  formatDetection: {
+    telephone: false
+  }
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1f2d3d"
 };
 
 export default function RootLayout({
@@ -16,6 +31,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
+        <PwaRegistration />
         <Script
           defer
           src="https://umami.champeau.info/script.js"

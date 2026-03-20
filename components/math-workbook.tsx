@@ -20,11 +20,12 @@ import { toBlob, toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 import {localeLabels, type AppLocale} from "@/i18n/routing";
 import {usePathname, useRouter} from "@/i18n/navigation";
+import {PWA_INSTALLABLE_EVENT, PWA_INSTALLED_EVENT} from "@/components/pwa-registration";
 
 type StudyMode = "college" | "lycee";
 type SheetStyle = "seyes" | "large-grid" | "small-grid" | "lined" | "blank";
 type StructuredTool = "fraction" | "addition" | "subtraction" | "multiplication" | "division" | "power" | "root";
-type UtilityMenu = "highlight" | "settings" | null;
+type UtilityMenu = "highlight" | "settings" | "install" | null;
 type GeometryTool = "point" | "segment" | "line" | "ray" | "circle" | "measure" | "protractor" | "compass";
 
 type FractionBlock = {
@@ -2510,6 +2511,8 @@ export function MathWorkbook() {
   const [isCanvasDropActive, setIsCanvasDropActive] = useState(false);
   const [selectionRect, setSelectionRect] = useState<SelectionRect>(null);
   const [isCanvasInteracting, setIsCanvasInteracting] = useState(false);
+  const [canInstallApp, setCanInstallApp] = useState(false);
+  const [isInstalledApp, setIsInstalledApp] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const selectionRef = useRef<Range | null>(null);
@@ -2936,6 +2939,33 @@ export function MathWorkbook() {
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [isHydrated, state]);
+
+  useEffect(() => {
+    const handleInstallable = (event: Event) => {
+      const customEvent = event as CustomEvent<{available?: boolean}>;
+      setCanInstallApp(Boolean(customEvent.detail?.available));
+    };
+
+    const handleInstalled = () => {
+      setCanInstallApp(false);
+      setIsInstalledApp(true);
+    };
+
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as Navigator & {standalone?: boolean}).standalone === true;
+
+    setIsInstalledApp(isStandalone);
+    setCanInstallApp(Boolean(window.__dysmathsDeferredInstallPrompt) && !isStandalone);
+
+    window.addEventListener(PWA_INSTALLABLE_EVENT, handleInstallable as EventListener);
+    window.addEventListener(PWA_INSTALLED_EVENT, handleInstalled);
+
+    return () => {
+      window.removeEventListener(PWA_INSTALLABLE_EVENT, handleInstallable as EventListener);
+      window.removeEventListener(PWA_INSTALLED_EVENT, handleInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     blocksRef.current = state.blocks;
@@ -7410,6 +7440,20 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     router.replace(pathname, {locale: nextLocale as AppLocale});
   }
 
+  async function installPwa() {
+    const promptEvent = window.__dysmathsDeferredInstallPrompt;
+    if (!promptEvent) {
+      toggleMenu("install");
+      return;
+    }
+
+    await promptEvent.prompt();
+    await promptEvent.userChoice.catch(() => undefined);
+    window.__dysmathsDeferredInstallPrompt = undefined;
+    setCanInstallApp(false);
+    setOpenMenu(null);
+  }
+
   function createExportSheetOverlay(sheetStyle: SheetStyle, width: number, height: number) {
     const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     overlay.setAttribute("class", "export-sheet-overlay");
@@ -8182,6 +8226,32 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
               </span>
               <span>{t("toolbar.settings")}</span>
             </button>
+
+            {!isInstalledApp ? (
+              <button
+                type="button"
+                className={`sidebar-settings-button ${openMenu === "install" ? "sidebar-settings-button-active" : ""}`}
+                aria-label={t("toolbar.install")}
+                title={t("toolbar.install")}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  void installPwa();
+                }}
+              >
+                <span className="sidebar-settings-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 3a1 1 0 0 1 1 1v8.59l2.3-2.29a1 1 0 1 1 1.4 1.41l-4 3.99a1 1 0 0 1-1.4 0l-4-3.99a1 1 0 1 1 1.4-1.41L11 12.59V4a1 1 0 0 1 1-1Zm-7 14a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z" />
+                  </svg>
+                </span>
+                <span>{t("toolbar.install")}</span>
+              </button>
+            ) : null}
+
+            {openMenu === "install" && !canInstallApp ? (
+              <div className="sidebar-settings-panel" role="note" aria-label={t("toolbar.install")}>
+                <p className="sidebar-settings-copy">{t("toolbar.installHelp")}</p>
+              </div>
+            ) : null}
 
             {openMenu === "settings" ? (
               <div className="sidebar-settings-panel" role="menu" aria-label={t("toolbar.settings")}>

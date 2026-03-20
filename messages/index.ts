@@ -53,6 +53,8 @@ type Messages = {
       newDocument: string;
       language: string;
       settings: string;
+      install: string;
+      installHelp: string;
     };
     geometryHelper: {
       idle: string;
@@ -236,7 +238,9 @@ const en: Messages = {
       sheetStyle: "Sheet style",
       newDocument: "New",
       language: "Language",
-      settings: "Settings"
+      settings: "Settings",
+      install: "Install",
+      installHelp: "Use the install icon in the address bar or your browser menu to install the app on this device."
     },
     geometryHelper: {
       idle: "Draw precise figures while preserving the sheet scale for printing.",
@@ -429,7 +433,9 @@ const fr: Messages = {
       sheetStyle: "Style de feuille",
       newDocument: "Nouveau",
       language: "Langue",
-      settings: "Paramètres"
+      settings: "Paramètres",
+      install: "Installer",
+      installHelp: "Utilise l’icône d’installation dans la barre d’adresse ou le menu du navigateur pour installer l’app sur cet appareil."
     },
     geometryHelper: {
       idle: "Trace des figures précises en gardant l’échelle de la feuille pour l’impression.",
@@ -622,7 +628,9 @@ const es: Messages = {
       sheetStyle: "Tipo de hoja",
       newDocument: "Nuevo",
       language: "Idioma",
-      settings: "Ajustes"
+      settings: "Ajustes",
+      install: "Instalar",
+      installHelp: "Usa el icono de instalación de la barra de direcciones o el menú del navegador para instalar la app en este dispositivo."
     },
     geometryHelper: {
       idle: "Traza figuras precisas manteniendo la escala de la hoja para la impresión.",

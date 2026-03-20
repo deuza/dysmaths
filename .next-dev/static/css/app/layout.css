@@ -228,6 +228,10 @@ button {
 
 .sidebar-settings {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
   margin: 0 0.05rem 0.55rem;
 }
 
@@ -285,6 +289,13 @@ button {
 
 .sidebar-settings-field {
   justify-items: stretch;
+}
+
+.sidebar-settings-copy {
+  margin: 0;
+  color: color-mix(in srgb, var(--ink) 72%, white);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .sidebar-credit {
