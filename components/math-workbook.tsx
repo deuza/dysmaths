@@ -544,6 +544,18 @@ const DEFAULT_DOCUMENT_LABELS: DefaultDocumentLabels = {
   date: "Date:"
 };
 
+function getDefaultSheetStyleForLocale(locale: AppLocale): SheetStyle {
+  switch (locale) {
+    case "fr":
+      return "seyes";
+    case "es":
+      return "small-grid";
+    case "en":
+    default:
+      return "lined";
+  }
+}
+
 function createDefaultHeaderTextBoxes(sheetStyle: SheetStyle, labels: DefaultDocumentLabels = DEFAULT_DOCUMENT_LABELS): FloatingTextBox[] {
   const metrics = getSheetMetrics(sheetStyle, 16);
   const fontSize = getDefaultCanvasFontSize(sheetStyle);
@@ -1531,7 +1543,7 @@ function getRemPixels() {
   return Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
 }
 
-function parseStoredState(raw: string): WriterState | null {
+function parseStoredState(raw: string, fallbackSheetStyle: SheetStyle, labels: DefaultDocumentLabels): WriterState | null {
   try {
     const parsed = JSON.parse(raw) as WriterState;
     const parsedSchemaVersion =
@@ -1545,8 +1557,8 @@ function parseStoredState(raw: string): WriterState | null {
       (parsed as { sheetStyle?: unknown }).sheetStyle === "blank" ||
       (parsed as { sheetStyle?: unknown }).sheetStyle === "seyes"
         ? (parsed as { sheetStyle: SheetStyle }).sheetStyle
-        : createDefaultState().sheetStyle;
-    const defaultState = createDefaultState(parsedSheetStyle);
+        : createDefaultState(fallbackSheetStyle, labels).sheetStyle;
+    const defaultState = createDefaultState(parsedSheetStyle, labels);
     const defaultFontSize = getDefaultCanvasFontSize(parsedSheetStyle);
     const defaultNoteFontSize = getDefaultNoteFontSize(parsedSheetStyle);
 
@@ -2462,7 +2474,8 @@ export function MathWorkbook() {
   const router = useRouter();
   const pathname = usePathname();
   const workbookUi = useMemo(() => createWorkbookUi(t), [t]);
-  const [state, setState] = useState<WriterState>(() => createDefaultState("seyes", workbookUi.defaultDocumentLabels));
+  const defaultSheetStyle = useMemo(() => getDefaultSheetStyleForLocale(locale), [locale]);
+  const [state, setState] = useState<WriterState>(() => createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels));
   const [historyPast, setHistoryPast] = useState<WriterState[]>([]);
   const [historyFuture, setHistoryFuture] = useState<WriterState[]>([]);
   const [openMenu, setOpenMenu] = useState<UtilityMenu>(null);
@@ -2544,8 +2557,8 @@ export function MathWorkbook() {
   const [activeResultCell, setActiveResultCell] = useState<{ blockId: string; cellIndex: number } | null>(null);
   const historyInitializedRef = useRef(false);
   const skipHistoryRef = useRef(false);
-  const previousStateRef = useRef<WriterState>(cloneWriterState(createDefaultState("seyes", workbookUi.defaultDocumentLabels)));
-  const stateRef = useRef<WriterState>(cloneWriterState(createDefaultState("seyes", workbookUi.defaultDocumentLabels)));
+  const previousStateRef = useRef<WriterState>(cloneWriterState(createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels)));
+  const stateRef = useRef<WriterState>(cloneWriterState(createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels)));
   const transientHistorySnapshotRef = useRef<WriterState | null>(null);
   const transientHistoryKindRef = useRef<"drag" | "edit" | null>(null);
   const suspendHistoryRef = useRef(false);
@@ -2906,7 +2919,7 @@ export function MathWorkbook() {
       return;
     }
 
-    const parsed = parseStoredState(saved);
+    const parsed = parseStoredState(saved, defaultSheetStyle, workbookUi.defaultDocumentLabels);
 
     if (!parsed) {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -2914,7 +2927,7 @@ export function MathWorkbook() {
     }
 
     setState(parsed);
-  }, []);
+  }, [defaultSheetStyle, workbookUi.defaultDocumentLabels]);
 
   useEffect(() => {
     if (!isHydrated) {
@@ -7377,7 +7390,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
   function confirmResetDocument() {
     window.localStorage.removeItem(STORAGE_KEY);
-    setState(createDefaultState("seyes", workbookUi.defaultDocumentLabels));
+    setState(createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels));
     setOpenMenu(null);
     setCanvasQuickMenu(null);
     setModalState(null);
