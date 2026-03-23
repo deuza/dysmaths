@@ -11,10 +11,10 @@ It has two goals at the same time:
 
 The written division feature is now split across a few focused modules:
 
-- orchestration and state wiring in [components/math-workbook.tsx](/C:/Users/micro/Documents/Dev/dysmaths/components/math-workbook.tsx)
-- shared types, helpers, and read-only preview rendering in [components/math-workbook/shared.tsx](/C:/Users/micro/Documents/Dev/dysmaths/components/math-workbook/shared.tsx)
-- inline division editing in [components/math-workbook/inline-editor-division.tsx](/C:/Users/micro/Documents/Dev/dysmaths/components/math-workbook/inline-editor-division.tsx)
-- global styling in [app/globals.css](/C:/Users/micro/Documents/Dev/dysmaths/app/globals.css)
+- orchestration and state wiring in [components/math-workbook.tsx](../components/math-workbook.tsx)
+- shared types, helpers, and read-only preview rendering in [components/math-workbook/shared.tsx](../components/math-workbook/shared.tsx)
+- inline division editing in [components/math-workbook/inline-editor-division.tsx](../components/math-workbook/inline-editor-division.tsx)
+- global styling in [app/globals.css](../app/globals.css)
 
 ## UX Overview
 
@@ -333,7 +333,7 @@ Notable behaviors:
 
 ## CSS and Visual Structure
 
-The styles are in [app/globals.css](/C:/Users/micro/Documents/Dev/dysmaths/app/globals.css).
+The styles are in [app/globals.css](../app/globals.css).
 
 Important classes:
 
