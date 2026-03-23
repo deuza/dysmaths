@@ -1971,9 +1971,10 @@ export function MathWorkbook() {
                 const delta = normalizeSignedAngleDelta(nextAngle - previousAngle);
                 const radiusMm = current.radiusMm ?? Math.hypot(current.current.xMm - current.center.xMm, current.current.yMm - current.center.yMm);
                 const clampedSweep = Math.max(-Math.PI * 2, Math.min(Math.PI * 2, current.accumulatedSweep + delta));
+                const arcEndAngle = (current.startAngle ?? nextAngle) + clampedSweep;
                 const projectedPoint = {
-                  xMm: current.center.xMm + Math.cos(nextAngle) * radiusMm,
-                  yMm: current.center.yMm + Math.sin(nextAngle) * radiusMm
+                  xMm: current.center.xMm + Math.cos(arcEndAngle) * radiusMm,
+                  yMm: current.center.yMm + Math.sin(arcEndAngle) * radiusMm
                 };
 
                 return {
