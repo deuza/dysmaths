@@ -9237,6 +9237,17 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
                     }}
                   >
                     <line className="canvas-geometry-hit" x1={rendered.x1} y1={rendered.y1} x2={rendered.x2} y2={rendered.y2} />
+                    {isSelected ? (
+                      <line
+                        className="canvas-geometry-selection-ring"
+                        x1={rendered.x1}
+                        y1={rendered.y1}
+                        x2={rendered.x2}
+                        y2={rendered.y2}
+                        strokeWidth={Math.max(8, strokeWidthPx + 6)}
+                        strokeLinecap="round"
+                      />
+                    ) : null}
                     <line className={`canvas-geometry-line ${shape.kind === "graduated-line" ? "canvas-geometry-graduated-line" : ""}`} x1={rendered.x1} y1={rendered.y1} x2={rendered.x2} y2={rendered.y2} stroke={shape.color} strokeWidth={strokeWidthPx} />
                     {shape.kind === "graduated-line" ? (
                       graduatedLineTicks.map((tick, index) => (

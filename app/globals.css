@@ -3052,9 +3052,12 @@ input {
 }
 
 .canvas-geometry-selection-ring {
-  stroke: rgba(217, 119, 69, 0.7);
-  stroke-width: 2;
-  stroke-dasharray: 5 5;
+  stroke: rgba(217, 119, 69, 0.32);
+  stroke-width: 10;
+  stroke-dasharray: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px rgba(217, 119, 69, 0.4));
 }
 
 .canvas-geometry-label {
