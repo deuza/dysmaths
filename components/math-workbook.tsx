@@ -1479,9 +1479,9 @@ function getGraduatedLineLabelPosition(ax: number, ay: number, bx: number, by: n
 
   return isVertical
     ? {
-        x: baseX - labelOffset,
+        x: baseX + labelOffset,
         y: baseY,
-        textAnchor: "end" as const,
+        textAnchor: "start" as const,
         dominantBaseline: "middle" as const
       }
     : {
@@ -2729,6 +2729,7 @@ export function MathWorkbook() {
   const graduatedLineDraftRef = useRef<GraduatedLineDraft | null>(null);
   const graduatedLineModalStateRef = useRef<GraduatedLineModalState>(null);
   const graduatedLineModalSettingsRef = useRef<GraduatedLineModalSettings>(null);
+  const graduatedLinePointerSessionRef = useRef<{ isPointerDown: boolean; hasMoved: boolean }>({ isPointerDown: false, hasMoved: false });
   const selectedGraduatedLineSettingsRef = useRef<{ startValue: string; sections: string } | null>(null);
   const lastGraduatedLineSectionsRef = useRef(10);
   const graduatedLineMenuSuppressedIdRef = useRef<string | null>(null);
@@ -3747,9 +3748,20 @@ export function MathWorkbook() {
 
       if (graduatedLineDraftRef.current && !graduatedLineModalStateRef.current) {
         isDrawingStrokeRef.current = false;
-        openGraduatedLineModal();
-        setIsCanvasInteracting(false);
-        return;
+        const graduatedLineSession = graduatedLinePointerSessionRef.current;
+
+        if (graduatedLineSession.isPointerDown && graduatedLineSession.hasMoved) {
+          graduatedLinePointerSessionRef.current = { isPointerDown: false, hasMoved: false };
+          openGraduatedLineModal();
+          setIsCanvasInteracting(false);
+          return;
+        }
+
+        if (graduatedLineSession.isPointerDown) {
+          graduatedLinePointerSessionRef.current = { isPointerDown: false, hasMoved: false };
+          setIsCanvasInteracting(false);
+          return;
+        }
       }
 
       const draggedSession = dragRef.current;
@@ -4540,6 +4552,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     graduatedLineModalStateRef.current = null;
     graduatedLineModalSettingsRef.current = null;
     graduatedLineDraftRef.current = null;
+    graduatedLinePointerSessionRef.current = { isPointerDown: false, hasMoved: false };
   }
 
   function createGraduatedLineShape(start: GeometryPointCoordinate, end: GeometryPointCoordinate, sections: number) {
@@ -4571,6 +4584,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
       current: { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm }
     };
     graduatedLineDraftRef.current = nextDraft;
+    graduatedLinePointerSessionRef.current = { isPointerDown: true, hasMoved: false };
     setGraduatedLineDraft(nextDraft);
     setSnapGuides(snappedPoint.guides);
   }
@@ -4586,6 +4600,14 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
       { xMm: snappedPoint.xMm, yMm: snappedPoint.yMm },
       snappedPoint.guides
     );
+    const previousDraft = graduatedLineDraftRef.current;
+    graduatedLinePointerSessionRef.current = {
+      ...graduatedLinePointerSessionRef.current,
+      hasMoved:
+        graduatedLinePointerSessionRef.current.hasMoved ||
+        Math.abs(lockedPoint.xMm - previousDraft.current.xMm) > 0.01 ||
+        Math.abs(lockedPoint.yMm - previousDraft.current.yMm) > 0.01
+    };
     setGraduatedLineDraft((current) => {
       if (!current) {
         return current;
@@ -4599,6 +4621,18 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
       return nextDraft;
     });
     setSnapGuides(lockedPoint.guides);
+    return true;
+  }
+
+  function finishGraduatedLineDrawing(clientX: number, clientY: number) {
+    if (!graduatedLineDraftRef.current || graduatedLineModalStateRef.current) {
+      return false;
+    }
+
+    updateGraduatedLineDraft(clientX, clientY);
+    graduatedLinePointerSessionRef.current = { isPointerDown: false, hasMoved: false };
+    openGraduatedLineModal();
+    setIsCanvasInteracting(false);
     return true;
   }
 
@@ -9726,6 +9760,11 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
                 }
 
                 if (advancedTool === "graduated-line") {
+                  if (graduatedLineDraftRef.current) {
+                    finishGraduatedLineDrawing(event.clientX, event.clientY);
+                    return;
+                  }
+
                   beginGraduatedLineDrawing(event.clientX, event.clientY);
                   return;
                 }
@@ -9750,6 +9789,11 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
                 const touch = event.touches[0];
                 if (advancedTool === "graduated-line") {
+                  if (graduatedLineDraftRef.current) {
+                    finishGraduatedLineDrawing(touch.clientX, touch.clientY);
+                    return;
+                  }
+
                   beginGraduatedLineDrawing(touch.clientX, touch.clientY);
                   return;
                 }
