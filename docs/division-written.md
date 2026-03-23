@@ -9,7 +9,12 @@ It has two goals at the same time:
 - provide a highly guided input flow for a child
 - preserve a visual result close to a real written division on paper
 
-The component is implemented mainly in [components/math-workbook.tsx](/C:/Users/micro/Documents/Dev/maths-facile/components/math-workbook.tsx) and styled in [app/globals.css](/C:/Users/micro/Documents/Dev/maths-facile/app/globals.css).
+The written division feature is now split across a few focused modules:
+
+- orchestration and state wiring in [components/math-workbook.tsx](/C:/Users/micro/Documents/Dev/dysmaths/components/math-workbook.tsx)
+- shared types, helpers, and read-only preview rendering in [components/math-workbook/shared.tsx](/C:/Users/micro/Documents/Dev/dysmaths/components/math-workbook/shared.tsx)
+- inline division editing in [components/math-workbook/inline-editor-division.tsx](/C:/Users/micro/Documents/Dev/dysmaths/components/math-workbook/inline-editor-division.tsx)
+- global styling in [app/globals.css](/C:/Users/micro/Documents/Dev/dysmaths/app/globals.css)
 
 ## UX Overview
 
@@ -113,6 +118,7 @@ type DivisionBlock = {
   quotient: string;
   remainder: string;
   work: string;
+  struckCells: string[];
 };
 ```
 
@@ -120,6 +126,7 @@ Important points:
 
 - `dividend`, `divisor`, and `quotient` are stored as strings
 - `work` stores all calculation lines in a single string, separated by line breaks
+- `struckCells` stores the crossed-out cells used by the inline strike mode
 - the position on the sheet is handled by `x` and `y`
 
 ## Main Utility Functions
@@ -232,7 +239,7 @@ This function is reused both in the normal view and in the edit preview layers.
 
 ## Normal View
 
-Read-only rendering is handled by `renderMathPreview(block)`.
+Read-only rendering is handled by `renderMathPreview(block)`, now defined in `components/math-workbook/shared.tsx`.
 
 For written division:
 
@@ -257,9 +264,9 @@ division-preview
 
 ## Interactive View
 
-Interactive rendering is handled by `renderInteractiveMathPreview(block)`.
+Interactive rendering is handled by `InteractiveMathPreview`, now defined in `components/math-workbook/presentational.tsx`.
 
-It reuses the same structure as the normal view, but each clickable sub-area is wrapped in `renderBlockPreviewButton(...)`.
+It reuses the same structure as the normal view, but each clickable sub-area is wrapped in a preview button component.
 
 Goal:
 
@@ -268,7 +275,7 @@ Goal:
 
 ## Inline Editing
 
-Inline editing is handled by `renderInlineBlockEditor(block)`.
+Inline editing is dispatched by `renderInlineBlockEditor(block)` from `components/math-workbook.tsx`, with the division-specific implementation extracted to `components/math-workbook/inline-editor-division.tsx`.
 
 There are 2 different strategies:
 
@@ -313,7 +320,7 @@ This part is intentionally stricter, because it represents the step-by-step writ
 Navigation is mainly handled in:
 
 - `handleInlineBlockKeyDown(...)`
-- `moveDivisionCellFocus(...)`
+- the division-specific handlers inside `renderDivisionInlineEditor(...)`
 
 Notable behaviors:
 
@@ -326,7 +333,7 @@ Notable behaviors:
 
 ## CSS and Visual Structure
 
-The styles are in [app/globals.css](/C:/Users/micro/Documents/Dev/maths-facile/app/globals.css).
+The styles are in [app/globals.css](/C:/Users/micro/Documents/Dev/dysmaths/app/globals.css).
 
 Important classes:
 
@@ -419,8 +426,6 @@ The layered free-field plus visible-cells approach preserves that continuity.
 
 ### Technical Improvements
 
-- extract all division logic into a dedicated module
-- isolate helpers in a utility file
 - add unit tests for:
   - `normalizeDivisionDecimalInput`
   - `getDivisionVisibleWorkLines`
