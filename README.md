@@ -85,7 +85,7 @@ Umami analytics is optional and only loads in production when both public enviro
 Copy [`.env.example`](./.env.example) to `.env.local` and configure:
 
 ```env
-NEXT_PUBLIC_UMAMI_SRC=https://umami.champeau.info/script.js
+NEXT_PUBLIC_UMAMI_SRC=https://umami.your-website.com/script.js
 NEXT_PUBLIC_UMAMI_WEBSITE_ID=your-website-id
 ```
 
