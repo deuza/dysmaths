@@ -851,6 +851,9 @@ input {
 }
 
 .toolbar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   border-radius: 999px;
   padding: 0.75rem 0.98rem;
   font-weight: 800;
@@ -2693,8 +2696,7 @@ input {
 .document-canvas-viewport {
   width: 100%;
   overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
   padding-bottom: 0.35rem;
 }
 
@@ -3582,7 +3584,7 @@ input {
 
 @media (max-width: 760px) {
   .document-canvas {
-    width: 100%;
+    min-width: var(--a4-width);
   }
 
   .canvas-editor {
