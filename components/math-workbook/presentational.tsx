@@ -501,14 +501,16 @@ export function WorkbookActionBar({
   return (
     <div className="sheet-action-bar">
       <div className="sheet-action-group">
-        <button type="button" className="toolbar-action ghost tablet-tools-toggle" onClick={onOpenTools} disabled={!canOpenTools}>
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-          {t("toolbar.tools")}
-        </button>
+        {canOpenTools ? (
+          <button type="button" className="toolbar-action ghost tablet-tools-toggle" onClick={onOpenTools}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+            {t("toolbar.tools")}
+          </button>
+        ) : null}
         <button type="button" className="toolbar-action ghost" onClick={onUndo} disabled={!canUndo}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 10h13a4 4 0 0 1 0 8H12" />
