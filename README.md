@@ -78,6 +78,19 @@ npm run build
 npm run start
 ```
 
+### Optional analytics configuration
+
+Umami analytics is optional and only loads in production when both public environment variables are set.
+
+Copy [`.env.example`](./.env.example) to `.env.local` and configure:
+
+```env
+NEXT_PUBLIC_UMAMI_SRC=https://umami.champeau.info/script.js
+NEXT_PUBLIC_UMAMI_WEBSITE_ID=your-website-id
+```
+
+If these variables are missing, the Umami script is not injected.
+
 ### Lint the project
 
 ```bash

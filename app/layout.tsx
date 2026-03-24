@@ -29,17 +29,23 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
+  const umamiSrc = process.env.NEXT_PUBLIC_UMAMI_SRC;
+  const umamiWebsiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID;
+  const enableAnalytics =
+    process.env.NODE_ENV === "production" && umamiSrc && umamiWebsiteId;
 
   return (
     <html lang={locale}>
       <body>
         {children}
         <PwaRegistration />
-        <Script
-          defer
-          src="https://umami.champeau.info/script.js"
-          data-website-id="5fb50e68-45bd-4a02-8da5-ffe741541fe3"
-        />
+        {enableAnalytics ? (
+          <Script
+            defer
+            src={umamiSrc}
+            data-website-id={umamiWebsiteId}
+          />
+        ) : null}
       </body>
     </html>
   );
