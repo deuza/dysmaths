@@ -15,4 +15,11 @@ coverage
 dev-*.out
 dev-*.err
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 Thumbs.db
+
+# IntelliJ / JetBrains
+.idea/
+*.iml

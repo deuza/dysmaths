@@ -371,8 +371,10 @@ export type EditingBlockState =
 
 export type CanvasQuickMenu =
   | {
-      x: number;
-      y: number;
+      left?: number;
+      right?: number;
+      top?: number;
+      bottom?: number;
       clickX: number;
       clickY: number;
     }

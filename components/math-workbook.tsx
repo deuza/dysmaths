@@ -2814,15 +2814,28 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     setCanvasQuickMenu(null);
   }
 
+  function getCanvasQuickMenuPosition(px: number, py: number) {
+    const size = getCanvasIntrinsicSize();
+    const flipX = px > size.width / 2;
+    const flipY = py > size.height / 2;
+
+    return {
+      ...(flipX ? { right: size.width - px + CANVAS_QUICK_MENU_OFFSET_X } : { left: px + CANVAS_QUICK_MENU_OFFSET_X }),
+      ...(flipY ? { bottom: size.height - py + CANVAS_QUICK_MENU_OFFSET_X } : { top: py }),
+      clickX: px,
+      clickY: py
+    };
+  }
+
   function openCanvasQuickMenu(clientX: number, clientY: number) {
     const point = getCanvasPoint(clientX, clientY);
-    setCanvasQuickMenu({ x: point.x + CANVAS_QUICK_MENU_OFFSET_X, y: point.y, clickX: point.x, clickY: point.y });
+    setCanvasQuickMenu(getCanvasQuickMenuPosition(point.x, point.y));
     clearFloatingSelection();
     setOpenMenu(null);
   }
 
   function openCanvasQuickMenuAtPoint(x: number, y: number) {
-    setCanvasQuickMenu({ x: x + CANVAS_QUICK_MENU_OFFSET_X, y, clickX: x, clickY: y });
+    setCanvasQuickMenu(getCanvasQuickMenuPosition(x, y));
     clearFloatingSelection();
     setOpenMenu(null);
   }
