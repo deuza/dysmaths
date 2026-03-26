@@ -6,6 +6,7 @@ import {
   renderShortcutGlyph,
   renderStructuredToolGlyph,
   DEFAULT_HIGHLIGHT_TOOL_COLOR,
+  SCRIPT_LETTER_OPTIONS,
   GRADUATED_LINE_PRESET_VALUES,
   getArithmeticOperator,
   getArithmeticCarryCells,
@@ -71,7 +72,10 @@ type WorkbookSidebarProps = {
   selectedHighlightColor: string | null;
   openMenu: "highlight" | "settings" | "install" | null;
   selectedCount: number;
-  canFormat: boolean;
+  activeFontWeight: number;
+  activeFontStyle: "normal" | "italic";
+  activeUnderline: boolean;
+  isElementMenuVisible: boolean;
   canInstallApp: boolean;
   isInstalledApp: boolean;
   onCloseToolsPanel: () => void;
@@ -81,6 +85,7 @@ type WorkbookSidebarProps = {
   onToolDragEnd: () => void;
   onTogglePendingStructuredTool: (toolId: StructuredTool) => void;
   onTogglePendingShortcut: (shortcutId: string) => void;
+  onSelectScriptLetter: (label: string, content: string) => void;
   onToggleAdvancedToolMode: (tool: AdvancedTool) => void;
   shouldIgnoreToolbarClick: () => boolean;
   onApplyActiveColor: (color: string) => void;
@@ -122,7 +127,10 @@ export function WorkbookSidebar({
   selectedHighlightColor,
   openMenu,
   selectedCount,
-  canFormat,
+  activeFontWeight,
+  activeFontStyle,
+  activeUnderline,
+  isElementMenuVisible,
   canInstallApp,
   isInstalledApp,
   onCloseToolsPanel,
@@ -132,6 +140,7 @@ export function WorkbookSidebar({
   onToolDragEnd,
   onTogglePendingStructuredTool,
   onTogglePendingShortcut,
+  onSelectScriptLetter,
   onToggleAdvancedToolMode,
   shouldIgnoreToolbarClick,
   onApplyActiveColor,
@@ -152,6 +161,7 @@ export function WorkbookSidebar({
   onDeleteProfile,
   onSetProfileEditMode
 }: WorkbookSidebarProps) {
+  const [isScriptDropdownOpen, setIsScriptDropdownOpen] = useState(false);
   return (
     <>
       {isToolsPanelOpen ? <button type="button" className="tools-drawer-backdrop" aria-label={t("toolbar.closeTools")} onClick={onCloseToolsPanel} /> : null}
@@ -238,8 +248,8 @@ export function WorkbookSidebar({
             </div>
           </div>
 
-          <div className="toolbar-row toolbar-row-secondary toolbar-row-format sidebar-block sidebar-block-compact" aria-label={t("toolbar.formatting")}>
-            <p className="sidebar-block-label">{t("toolbar.formatting")}</p>
+          <div className={`toolbar-row toolbar-row-secondary toolbar-row-format sidebar-block sidebar-block-compact${isElementMenuVisible ? " toolbar-row-disabled" : ""}`} aria-label={t("toolbar.formatting")} aria-disabled={isElementMenuVisible}>
+            <p className="sidebar-block-label">{t("toolbar.defaultStyle")}</p>
 
             <div className="toolbar-color-row">
               <span className="toolbar-color-icon" title={t("toolbar.textColor")} aria-label={t("toolbar.textColor")}>
@@ -250,13 +260,14 @@ export function WorkbookSidebar({
                 <button
                   key={option.id}
                   type="button"
-                  className={`color-chip ${activeColor === option.value ? "color-chip-active" : ""}`}
-                  style={{backgroundColor: option.value, color: option.value}}
+                  className={`canvas-quick-action canvas-text-color-chip${activeColor === option.value ? " canvas-text-color-chip-active" : ""}`}
                   aria-label={option.label}
                   title={option.label}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => onApplyActiveColor(option.value)}
-                />
+                >
+                  <span className="canvas-text-color-sample" style={{backgroundColor: option.value}} />
+                </button>
               ))}
             </div>
 
@@ -269,7 +280,7 @@ export function WorkbookSidebar({
               </span>
               <button
                 type="button"
-                className={`color-chip color-chip-none ${activeHighlightColor === null ? "color-chip-active" : ""}`}
+                className={`canvas-quick-action canvas-text-highlight-chip${activeHighlightColor === null ? " canvas-text-highlight-chip-active" : ""}`}
                 title={t("toolbar.noBackground")}
                 aria-label={t("toolbar.noBackground")}
                 onMouseDown={(event) => event.preventDefault()}
@@ -279,30 +290,31 @@ export function WorkbookSidebar({
                 <button
                   key={option.id}
                   type="button"
-                  className={`color-chip ${activeHighlightColor === option.value ? "color-chip-active" : ""}`}
-                  style={{backgroundColor: option.value, color: option.value}}
+                  className={`canvas-quick-action canvas-text-highlight-chip${activeHighlightColor === option.value ? " canvas-text-highlight-chip-active" : ""}`}
                   aria-label={option.label}
                   title={option.label}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => onApplyActiveHighlightColor(option.value)}
-                />
+                >
+                  <span className="canvas-text-highlight-sample" style={{backgroundColor: option.value}} />
+                </button>
               ))}
             </div>
 
             <div className="toolbar-color-row">
-              <button type="button" className="chip-button chip-button-compact" disabled={!canFormat} aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasBold}>
+              <button type="button" className={`chip-button chip-button-compact${activeFontWeight >= 700 ? " chip-button-active" : ""}`} aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasBold}>
                 B
               </button>
-              <button type="button" className="chip-button chip-button-compact" disabled={!canFormat} aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasItalic}>
+              <button type="button" className={`chip-button chip-button-compact${activeFontStyle === "italic" ? " chip-button-active" : ""}`} aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasItalic}>
                 I
               </button>
-              <button type="button" className="chip-button chip-button-compact" disabled={!canFormat} aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasUnderline}>
+              <button type="button" className={`chip-button chip-button-compact${activeUnderline ? " chip-button-active" : ""}`} aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasUnderline}>
                 <span style={{textDecoration: "underline"}}>U</span>
               </button>
-              <button type="button" className="chip-button chip-button-compact" disabled={!canFormat} aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("down")}>
+              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("down")}>
                 A-
               </button>
-              <button type="button" className="chip-button chip-button-compact" disabled={!canFormat} aria-label={t("toolbar.increase")} title={t("toolbar.increase")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("up")}>
+              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.increase")} title={t("toolbar.increase")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("up")}>
                 A+
               </button>
             </div>
@@ -390,7 +402,7 @@ export function WorkbookSidebar({
                   {renderStructuredToolGlyph(rootStructuredTool.id)}
                 </button>
               ) : null}
-              {commonInlineShortcuts.map((shortcut) => (
+              {commonInlineShortcuts.filter((s) => !s.id.startsWith("script")).map((shortcut) => (
                 <button
                   key={shortcut.id}
                   type="button"
@@ -411,6 +423,35 @@ export function WorkbookSidebar({
                   {renderShortcutGlyph(shortcut)}
                 </button>
               ))}
+              <button
+                type="button"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${isScriptDropdownOpen || pendingInsertTool?.kind === "scriptLetter" ? "toolbar-shortcut-active" : ""}`}
+                title={t("toolbar.scriptLetters")}
+                aria-expanded={isScriptDropdownOpen}
+                onClick={() => setIsScriptDropdownOpen((open) => !open)}
+              >
+                <span className="math-shortcut-glyph">{"\u{1D4B6}\u2009\u2026\u2009\u{1D4CF}"}</span>
+              </button>
+              {isScriptDropdownOpen ? createPortal(
+                <div className="toolbar-script-backdrop" onClick={() => setIsScriptDropdownOpen(false)}>
+                  <div className="toolbar-script-dropdown" onClick={(event) => event.stopPropagation()}>
+                    {SCRIPT_LETTER_OPTIONS.map((option) => (
+                      <button
+                        key={option.letter}
+                        type="button"
+                        className={`toolbar-script-letter ${pendingInsertTool?.kind === "scriptLetter" && pendingInsertTool.content === option.script ? "toolbar-script-letter-active" : ""}`}
+                        onClick={() => {
+                          onSelectScriptLetter(option.script, option.script);
+                          setIsScriptDropdownOpen(false);
+                        }}
+                      >
+                        {option.script}
+                      </button>
+                    ))}
+                  </div>
+                </div>,
+                document.body
+              ) : null}
             </div>
           </div>
 
@@ -1264,6 +1305,9 @@ type TextFormatMenuProps = {
   activeColor: string;
   highlightOptions: HighlightOption[];
   selectedHighlightColor: string | null;
+  selectedFontWeight: number;
+  selectedFontStyle: "normal" | "italic";
+  selectedUnderline: boolean;
   onClose: () => void;
   onApplyColor: (color: string) => void;
   onBold: () => void;
@@ -1281,6 +1325,9 @@ export function TextFormatMenu({
   activeColor,
   highlightOptions,
   selectedHighlightColor,
+  selectedFontWeight,
+  selectedFontStyle,
+  selectedUnderline,
   onClose,
   onApplyColor,
   onBold,
@@ -1352,13 +1399,13 @@ export function TextFormatMenu({
       </div>
 
       <div className="canvas-format-row">
-        <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onClick={onBold}>
+        <button type="button" className={`canvas-quick-action canvas-text-format-action${selectedFontWeight >= 700 ? " canvas-text-format-action-active" : ""}`} aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onClick={onBold}>
           B
         </button>
-        <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onClick={onItalic}>
+        <button type="button" className={`canvas-quick-action canvas-text-format-action${selectedFontStyle === "italic" ? " canvas-text-format-action-active" : ""}`} aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onClick={onItalic}>
           I
         </button>
-        <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onClick={onUnderline}>
+        <button type="button" className={`canvas-quick-action canvas-text-format-action${selectedUnderline ? " canvas-text-format-action-active" : ""}`} aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onClick={onUnderline}>
           <span style={{textDecoration: "underline"}}>U</span>
         </button>
         <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onClick={() => onSizeChange("down")}>

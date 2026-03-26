@@ -31,6 +31,8 @@ type Messages = {
       highSchoolTools: string;
       highSchoolShortcuts: string;
       formatting: string;
+      defaultStyle: string;
+      scriptLetters: string;
       textColor: string;
       backgroundColor: string;
       noBackground: string;
@@ -255,6 +257,8 @@ const en: Messages = {
       highSchoolTools: "High school tools",
       highSchoolShortcuts: "High school shortcuts",
       formatting: "Formatting",
+      defaultStyle: "Default style",
+      scriptLetters: "Script letters",
       textColor: "Text color",
       backgroundColor: "Background color",
       noBackground: "No background",
@@ -488,6 +492,8 @@ const fr: Messages = {
       highSchoolTools: "Outils lycée",
       highSchoolShortcuts: "Raccourcis lycée",
       formatting: "Mise en forme",
+      defaultStyle: "Style par défaut",
+      scriptLetters: "Lettres cursives",
       textColor: "Couleur du texte",
       backgroundColor: "Couleur de fond",
       noBackground: "Sans fond",
@@ -721,6 +727,8 @@ const es: Messages = {
       highSchoolTools: "Herramientas de bachillerato",
       highSchoolShortcuts: "Atajos de bachillerato",
       formatting: "Formato",
+      defaultStyle: "Estilo por defecto",
+      scriptLetters: "Letras cursivas",
       textColor: "Color del texto",
       backgroundColor: "Color de fondo",
       noBackground: "Sin fondo",

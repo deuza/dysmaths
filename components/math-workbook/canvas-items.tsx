@@ -1,11 +1,8 @@
 import {useRef} from "react";
 import type {CSSProperties as ReactCSSProperties, MouseEvent as ReactMouseEvent, ReactNode, TouchEvent as ReactTouchEvent} from "react";
 import {InteractiveMathPreview} from "@/components/math-workbook/presentational";
-import {DEFAULT_INTEGRAL_SYMBOL_SIZE, DEFAULT_SUM_SYMBOL_SIZE, renderIntegralSymbolSvg, renderShortcutGlyph, renderSumSymbolSvg} from "@/components/math-workbook/shared";
+import {DEFAULT_INTEGRAL_SYMBOL_SIZE, DEFAULT_SUM_SYMBOL_SIZE, SCRIPT_CHARS, DOUBLE_TAP_DELAY, renderIntegralSymbolSvg, renderShortcutGlyph, renderSumSymbolSvg} from "@/components/math-workbook/shared";
 import type {FloatingSymbol, FloatingTextBox, MathBlock, WorkbookTranslator} from "@/components/math-workbook/shared";
-
-const SCRIPT_CHARS: Record<string, string> = { x: "\u{1D4CD}", y: "\u{1D4CE}", z: "\u{1D4CF}" };
-const DOUBLE_TAP_DELAY = 400;
 
 type TextShortcutItem = {
   id: string;

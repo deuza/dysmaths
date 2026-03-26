@@ -123,6 +123,8 @@ import {
   CANVAS_GRID_TOP_REM,
   MAX_SNAP_THRESHOLD_PX,
   CANVAS_LINE_BASELINE_OFFSET_PX,
+  SCRIPT_CHARS,
+  DOUBLE_TAP_DELAY,
   DEFAULT_ACTIVE_COLOR,
   DEFAULT_HIGHLIGHT_TOOL_COLOR,
   DEFAULT_SUM_SYMBOL_SIZE,
@@ -291,7 +293,7 @@ export function MathWorkbook() {
   const [selectedGraduatedLineSettings, setSelectedGraduatedLineSettings] = useState<{ startValue: string; sections: string } | null>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuides>({ x: null, y: null });
-  const [selectedTextBoxMenuPosition, setSelectedTextBoxMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
+  const [selectedElementMenuPosition, setSelectedElementMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
   const [selectedGeometryMenuPosition, setSelectedGeometryMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "png" | "print" | null>(null);
@@ -354,9 +356,10 @@ export function MathWorkbook() {
   const geometryNodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const pendingFocusTextBoxIdRef = useRef<string | null>(null);
   const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | HTMLTextAreaElement | null>>>({});
-  const selectedTextBoxMenuRef = useRef<HTMLDivElement | null>(null);
+  const selectedElementMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedGeometryMenuRef = useRef<HTMLDivElement | null>(null);
   const pendingNumericSelectionRef = useRef<{ blockId: string; field: string; start: number; end: number } | null>(null);
+  const inlineLastKeyRef = useRef<{ key: string; time: number } | null>(null);
   const [activeResultCell, setActiveResultCell] = useState<{ blockId: string; cellIndex: number } | null>(null);
   const historyInitializedRef = useRef(false);
   const skipHistoryRef = useRef(false);
@@ -585,32 +588,52 @@ export function MathWorkbook() {
       placement
     };
   }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedGeometryIds, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.geometry, state.strokes, state.symbols, state.textBoxes]);
+  const selectedFormatElement = useMemo(() => {
+    const block = selectedBlockId ? state.blocks.find((b) => b.id === selectedBlockId) : null;
+    if (block) return block;
+    const symbol = selectedSymbolId ? state.symbols.find((s) => s.id === selectedSymbolId) : null;
+    if (symbol) return symbol;
+    const textBox = selectedTextBoxId ? state.textBoxes.find((t) => t.id === selectedTextBoxId) : null;
+    if (textBox) return textBox;
+    const stroke = selectedStrokeId ? state.strokes.find((s) => s.id === selectedStrokeId) : null;
+    if (stroke) return { ...stroke, fontWeight: stroke.width >= 4 ? 700 : 500, fontStyle: "normal" as const, underline: false, highlightColor: null };
+    return null;
+  }, [selectedBlockId, selectedSymbolId, selectedTextBoxId, selectedStrokeId, state.blocks, state.symbols, state.textBoxes, state.strokes]);
+
   useEffect(() => {
-    if (!selectedTextBox || editingTextBoxId === selectedTextBox.id || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
-      setSelectedTextBoxMenuPosition(null);
+    const hasFormatElement = selectedBlock || selectedSymbol || selectedTextBox || selectedStroke;
+    if (!hasFormatElement || (selectedTextBox && editingTextBoxId === selectedTextBox.id) || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
+      setSelectedElementMenuPosition(null);
       return;
     }
 
     const updateMenuPosition = () => {
       const canvasNode = canvasRef.current;
-      const textBoxNode = textBoxNodeRefs.current[selectedTextBox.id];
+      const elementNode: HTMLElement | SVGGElement | null | undefined =
+        selectedBlockId ? blockNodeRefs.current[selectedBlockId]
+        : selectedSymbolId ? symbolNodeRefs.current[selectedSymbolId]
+        : selectedTextBoxId ? textBoxNodeRefs.current[selectedTextBoxId]
+        : selectedStrokeId ? strokeNodeRefs.current[selectedStrokeId]
+        : null;
 
-      if (!canvasNode || !textBoxNode) {
-        setSelectedTextBoxMenuPosition(null);
+      if (!canvasNode || !elementNode) {
+        setSelectedElementMenuPosition(null);
         return;
       }
 
-      const menuNode = selectedTextBoxMenuRef.current;
+      const canvasBounds = canvasNode.getBoundingClientRect();
+      const elementBounds = elementNode.getBoundingClientRect();
+      const menuNode = selectedElementMenuRef.current;
       const menuOffset = 12;
       const horizontalGutter = 18;
       const estimatedMenuWidth = menuNode?.offsetWidth ?? 236;
       const estimatedMenuHeight = menuNode?.offsetHeight ?? 52;
       const canvasWidth = canvasNode.clientWidth;
       const canvasHeight = canvasNode.clientHeight;
-      const boxLeft = textBoxNode.offsetLeft;
-      const boxTop = textBoxNode.offsetTop;
-      const boxWidth = textBoxNode.offsetWidth;
-      const boxHeight = textBoxNode.offsetHeight;
+      const boxLeft = elementBounds.left - canvasBounds.left;
+      const boxTop = elementBounds.top - canvasBounds.top;
+      const boxWidth = elementBounds.width;
+      const boxHeight = elementBounds.height;
       const boxBottom = boxTop + boxHeight;
       const preferredCenterX = boxLeft + boxWidth / 2;
       const minCenterX = horizontalGutter + estimatedMenuWidth / 2;
@@ -625,7 +648,7 @@ export function MathWorkbook() {
       const placement: "above" | "below" = fitsAbove || !fitsBelow ? "above" : "below";
       const y = placement === "above" ? Math.max(horizontalGutter, boxTop - menuOffset) : Math.min(Math.max(horizontalGutter, belowY), Math.max(horizontalGutter, canvasHeight - horizontalGutter));
 
-      setSelectedTextBoxMenuPosition((current) =>
+      setSelectedElementMenuPosition((current) =>
         current && current.x === x && current.y === y && current.placement === placement
           ? current
           : { x, y, placement }
@@ -643,7 +666,7 @@ export function MathWorkbook() {
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resizeHandler);
     };
-  }, [editingTextBoxId, isCanvasInteracting, selectedCount, selectedTextBox, selectionRect]);
+  }, [editingTextBoxId, isCanvasInteracting, selectedBlock, selectedBlockId, selectedCount, selectedStroke, selectedStrokeId, selectedSymbol, selectedSymbolId, selectedTextBox, selectedTextBoxId, selectionRect]);
   useEffect(() => {
     if (!selectedGeometry || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current || activeGeometryTool) {
       setSelectedGeometryMenuPosition(null);
@@ -716,6 +739,10 @@ export function MathWorkbook() {
 
     if (pendingInsertTool.kind === "structured") {
       return activeStructuredTools.find((tool) => tool.id === pendingInsertTool.toolId)?.label ?? workbookUi.blockTitles.default;
+    }
+
+    if (pendingInsertTool.kind === "scriptLetter") {
+      return pendingInsertTool.label;
     }
 
     return findShortcutById(pendingInsertTool.shortcutId)?.hint ?? findShortcutById(pendingInsertTool.shortcutId)?.label ?? workbookUi.blockTitles.default;
@@ -1499,9 +1526,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         numeratorStrike: false,
         denominatorStrike: false,
@@ -1523,9 +1550,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
@@ -1545,9 +1572,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
@@ -1567,9 +1594,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
@@ -1588,19 +1615,19 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
     }
 
     if (type === "power") {
-      return { id: createId("power"), type, base: "", exponent: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: 500, fontStyle: "normal", underline: false, highlightColor: null, ...position } satisfies MathBlock;
+      return { id: createId("power"), type, base: "", exponent: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: state.activeFontWeight, fontStyle: state.activeFontStyle, underline: state.activeUnderline, highlightColor: null, ...position } satisfies MathBlock;
     }
 
-    return { id: createId("root"), type, radicand: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: 500, fontStyle: "normal", underline: false, highlightColor: null, ...position } satisfies MathBlock;
+    return { id: createId("root"), type, radicand: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: state.activeFontWeight, fontStyle: state.activeFontStyle, underline: state.activeUnderline, highlightColor: null, ...position } satisfies MathBlock;
   }
 
   function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number) {
@@ -1618,9 +1645,9 @@ export function MathWorkbook() {
         y,
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null
       } satisfies FloatingSymbol;
     }
@@ -1637,9 +1664,9 @@ export function MathWorkbook() {
         y,
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null
       } satisfies FloatingSymbol;
     }
@@ -1654,9 +1681,9 @@ export function MathWorkbook() {
       y,
       color: state.activeColor,
       fontSize: defaultFontSize,
-      fontWeight: 500,
-      fontStyle: "normal",
-      underline: false,
+      fontWeight: state.activeFontWeight,
+      fontStyle: state.activeFontStyle,
+      underline: state.activeUnderline,
       highlightColor: null
     } satisfies FloatingSymbol;
   }
@@ -1696,9 +1723,9 @@ export function MathWorkbook() {
       text: "",
       color: state.activeColor,
       fontSize: variant === "note" ? defaultNoteFontSize : defaultFontSize,
-      fontWeight: 500,
-      fontStyle: "normal",
-      underline: false,
+      fontWeight: state.activeFontWeight,
+      fontStyle: state.activeFontStyle,
+      underline: state.activeUnderline,
       highlightColor: null,
       x,
       y: Math.max(18, y - yOffset),
@@ -2925,6 +2952,8 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         nextValue = null;
       } else if (current.kind === "shortcut" && nextTool.kind === "shortcut" && current.shortcutId === nextTool.shortcutId) {
         nextValue = null;
+      } else if (current.kind === "scriptLetter" && nextTool.kind === "scriptLetter" && current.content === nextTool.content) {
+        nextValue = null;
       } else {
         nextValue = nextTool;
       }
@@ -2963,6 +2992,12 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
     if (pendingInsertTool.kind === "structured") {
       createStructuredToolAt(pendingInsertTool.toolId, x, y, "exact");
+      setPendingInsertTool(null);
+      return true;
+    }
+
+    if (pendingInsertTool.kind === "scriptLetter") {
+      createScriptLetterAt(pendingInsertTool.label, pendingInsertTool.content, x, y);
       setPendingInsertTool(null);
       return true;
     }
@@ -3161,6 +3196,33 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     }));
     beginBlockEditingAfterInsert(block.id, getInlineStartField(type));
     setCanvasQuickMenu(null);
+  }
+
+  function createScriptLetterAt(label: string, content: string, x: number, y: number) {
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const placement = getExactCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24);
+    const defaultFontSize = getDefaultCanvasFontSize(state.sheetStyle);
+    const symbol = {
+      id: createId("symbol"),
+      type: "symbol",
+      label,
+      content,
+      kind: "text",
+      x: placement.x,
+      y: placement.y,
+      color: state.activeColor,
+      fontSize: defaultFontSize,
+      fontWeight: state.activeFontWeight,
+      fontStyle: state.activeFontStyle,
+      underline: state.activeUnderline,
+      highlightColor: null
+    } satisfies FloatingSymbol;
+    setState((current) => ({
+      ...current,
+      symbols: [...current.symbols, symbol]
+    }));
+    setSelectedSymbolIds([symbol.id]);
   }
 
   function createShortcutSymbolAt(shortcutId: string, x: number, y: number, mode: "exact" | "soft" = "soft") {
@@ -3467,6 +3529,18 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     if (editorRef.current && editorRef.current.contains(document.activeElement)) {
       runCommand("foreColor", color);
     }
+  }
+
+  function togglePendingBold() {
+    setState((current) => ({ ...current, activeFontWeight: current.activeFontWeight >= 700 ? 500 : 700 }));
+  }
+
+  function togglePendingItalic() {
+    setState((current) => ({ ...current, activeFontStyle: current.activeFontStyle === "italic" ? "normal" : "italic" }));
+  }
+
+  function togglePendingUnderline() {
+    setState((current) => ({ ...current, activeUnderline: !current.activeUnderline }));
   }
 
   function toggleCanvasBold() {
@@ -3848,6 +3922,26 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
   }
 
   function handleInlineBlockKeyDown(blockId: string, field: string, event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (!event.repeat && event.key in SCRIPT_CHARS) {
+      const now = Date.now();
+      const last = inlineLastKeyRef.current;
+      if (last && last.key === event.key && now - last.time < DOUBLE_TAP_DELAY) {
+        event.preventDefault();
+        const el = event.currentTarget;
+        const pos = el.selectionStart ?? el.value.length;
+        const scriptChar = SCRIPT_CHARS[event.key];
+        const nextValue = el.value.slice(0, Math.max(0, pos - 1)) + scriptChar + el.value.slice(pos);
+        updateInlineBlockField(blockId, field, nextValue);
+        const newPos = Math.max(0, pos - 1) + scriptChar.length;
+        requestAnimationFrame(() => { el.setSelectionRange(newPos, newPos); });
+        inlineLastKeyRef.current = null;
+        return;
+      }
+      inlineLastKeyRef.current = { key: event.key, time: now };
+    } else if (!(event.key in SCRIPT_CHARS)) {
+      inlineLastKeyRef.current = null;
+    }
+
     const block = blocksRef.current.find((item) => item.id === blockId);
 
     if (!block) {
@@ -5115,16 +5209,20 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         onToolDragEnd={handleToolDragEnd}
         onTogglePendingStructuredTool={(toolId) => togglePendingInsertTool({kind: "structured", toolId})}
         onTogglePendingShortcut={(shortcutId) => togglePendingInsertTool({kind: "shortcut", shortcutId})}
+        onSelectScriptLetter={(label, content) => togglePendingInsertTool({kind: "scriptLetter", label, content})}
         onToggleAdvancedToolMode={toggleAdvancedToolMode}
         shouldIgnoreToolbarClick={shouldIgnoreToolbarClick}
         onApplyActiveColor={applyActiveColor}
         onApplyActiveHighlightColor={applyCanvasHighlight}
-        onToggleCanvasBold={toggleCanvasBold}
-        onToggleCanvasItalic={toggleCanvasItalic}
-        onToggleCanvasUnderline={toggleCanvasUnderline}
+        onToggleCanvasBold={togglePendingBold}
+        onToggleCanvasItalic={togglePendingItalic}
+        onToggleCanvasUnderline={togglePendingUnderline}
+        activeFontWeight={state.activeFontWeight}
+        activeFontStyle={state.activeFontStyle}
+        activeUnderline={state.activeUnderline}
+        isElementMenuVisible={selectedElementMenuPosition !== null}
         onAdjustCanvasSize={adjustCanvasSize}
         onToggleMenu={toggleMenu}
-        canFormat={selectedCount > 0 || editingTextBoxId !== null}
         onToggleHighlightTool={toggleHighlightTool}
         onActivateHighlightTool={activateHighlightTool}
         onHeaderDelete={handleHeaderDelete}
@@ -5287,17 +5385,19 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
               onPaste={handlePaste}
             />
 
-            {pendingInsertTool?.kind === "shortcut" && insertCursorPreview.visible ? (
+            {(pendingInsertTool?.kind === "shortcut" || pendingInsertTool?.kind === "scriptLetter") && insertCursorPreview.visible ? (
               <div
                 className="canvas-insert-anchor"
                 style={{ left: `${insertCursorPreview.x}px`, top: `${insertCursorPreview.y}px`, color: state.activeColor }}
                 aria-hidden="true"
               >
-                {renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
+                {pendingInsertTool.kind === "scriptLetter"
+                  ? renderShortcutGlyph({ id: "scriptLetter", label: pendingInsertTool.label })
+                  : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
               </div>
             ) : null}
 
-            {((pendingInsertTool && pendingInsertTool.kind !== "shortcut") || advancedTool === "highlight") && insertCursorPreview.visible ? (
+            {((pendingInsertTool && pendingInsertTool.kind !== "shortcut" && pendingInsertTool.kind !== "scriptLetter") || advancedTool === "highlight") && insertCursorPreview.visible ? (
               <div
                 className={`canvas-insert-cursor ${advancedTool === "highlight" ? "canvas-insert-cursor-highlighter" : ""} ${pendingInsertTool?.kind === "shortcut" ? "canvas-insert-cursor-symbol" : ""}`}
                 style={{
@@ -5316,6 +5416,8 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
                   renderStructuredToolGlyph(pendingInsertTool.toolId)
                 ) : pendingInsertTool?.kind === "shortcut" ? (
                   renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })
+                ) : pendingInsertTool?.kind === "scriptLetter" ? (
+                  renderShortcutGlyph({ id: "scriptLetter", label: pendingInsertTool.label })
                 ) : null}
               </div>
             ) : null}
@@ -5323,7 +5425,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
             {pendingInsertTool ? (
               <div key={`${pendingInsertTool.kind}-${pendingInsertLabel}`} className="canvas-insert-hint" aria-live="polite">
                 <span className="canvas-insert-hint-glyph" aria-hidden="true">
-                  {pendingInsertTool.kind === "text" ? "T" : pendingInsertTool.kind === "structured" ? renderStructuredToolGlyph(pendingInsertTool.toolId) : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
+                  {pendingInsertTool.kind === "text" ? "T" : pendingInsertTool.kind === "structured" ? renderStructuredToolGlyph(pendingInsertTool.toolId) : pendingInsertTool.kind === "scriptLetter" ? renderShortcutGlyph({ id: "scriptLetter", label: pendingInsertTool.label }) : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
                 </span>
                 <span>{t("canvas.insertHint", {item: pendingInsertLabel})}</span>
               </div>
@@ -5575,12 +5677,15 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
             <TextFormatMenu
               t={t}
-              menuRef={selectedTextBoxMenuRef}
-              position={selectedTextBoxMenuPosition}
+              menuRef={selectedElementMenuRef}
+              position={selectedElementMenuPosition}
               colorOptions={workbookUi.colorOptions}
               activeColor={state.activeColor}
               highlightOptions={workbookUi.highlightOptions}
               selectedHighlightColor={selectedHighlightColor}
+              selectedFontWeight={selectedFormatElement?.fontWeight ?? 500}
+              selectedFontStyle={selectedFormatElement?.fontStyle ?? "normal"}
+              selectedUnderline={selectedFormatElement?.underline ?? false}
               onClose={clearFloatingSelection}
               onApplyColor={applyActiveColor}
               onBold={toggleCanvasBold}
