@@ -1,9 +1,12 @@
+import {useState} from "react";
+import {createPortal} from "react-dom";
 import type {DragEvent as ReactDragEvent, ReactNode, RefObject} from "react";
 import {localeLabels, type AppLocale} from "@/i18n/routing";
 import {
   renderShortcutGlyph,
   renderStructuredToolGlyph,
   DEFAULT_HIGHLIGHT_TOOL_COLOR,
+  SCRIPT_LETTER_OPTIONS,
   GRADUATED_LINE_PRESET_VALUES,
   getArithmeticOperator,
   getArithmeticCarryCells,
@@ -43,7 +46,9 @@ import {
   type SheetStyleOption,
   type SubtractionBlock,
   type StructuredTool,
+  type StudyMode,
   type StructuredToolOption,
+  type UserProfile,
   type WorkbookTranslator
 } from "@/components/math-workbook/shared";
 
@@ -67,6 +72,10 @@ type WorkbookSidebarProps = {
   selectedHighlightColor: string | null;
   openMenu: "highlight" | "settings" | "install" | null;
   selectedCount: number;
+  activeFontWeight: number;
+  activeFontStyle: "normal" | "italic";
+  activeUnderline: boolean;
+  isElementMenuVisible: boolean;
   canInstallApp: boolean;
   isInstalledApp: boolean;
   onCloseToolsPanel: () => void;
@@ -76,18 +85,26 @@ type WorkbookSidebarProps = {
   onToolDragEnd: () => void;
   onTogglePendingStructuredTool: (toolId: StructuredTool) => void;
   onTogglePendingShortcut: (shortcutId: string) => void;
+  onSelectScriptLetter: (label: string, content: string) => void;
   onToggleAdvancedToolMode: (tool: AdvancedTool) => void;
   shouldIgnoreToolbarClick: () => boolean;
   onApplyActiveColor: (color: string) => void;
+  onApplyActiveHighlightColor: (color: string) => void;
   onToggleCanvasBold: () => void;
   onToggleCanvasItalic: () => void;
   onToggleCanvasUnderline: () => void;
   onAdjustCanvasSize: (direction: "down" | "up") => void;
   onToggleMenu: (menu: "highlight" | "settings" | "install") => void;
+  onToggleHighlightTool: () => void;
   onActivateHighlightTool: (highlightColor: string) => void;
   onHeaderDelete: () => void;
   onInstallPwa: () => void;
   onLocaleChange: (locale: string) => void;
+  profiles: UserProfile[];
+  activeProfileId: string | null;
+  onProfileChange: (profileId: string | null) => void;
+  onDeleteProfile: (profileId: string) => void;
+  onSetProfileEditMode: (mode: "create" | "edit" | null) => void;
 };
 
 export function WorkbookSidebar({
@@ -110,6 +127,10 @@ export function WorkbookSidebar({
   selectedHighlightColor,
   openMenu,
   selectedCount,
+  activeFontWeight,
+  activeFontStyle,
+  activeUnderline,
+  isElementMenuVisible,
   canInstallApp,
   isInstalledApp,
   onCloseToolsPanel,
@@ -119,25 +140,186 @@ export function WorkbookSidebar({
   onToolDragEnd,
   onTogglePendingStructuredTool,
   onTogglePendingShortcut,
+  onSelectScriptLetter,
   onToggleAdvancedToolMode,
   shouldIgnoreToolbarClick,
   onApplyActiveColor,
+  onApplyActiveHighlightColor,
   onToggleCanvasBold,
   onToggleCanvasItalic,
   onToggleCanvasUnderline,
   onAdjustCanvasSize,
   onToggleMenu,
+  onToggleHighlightTool,
   onActivateHighlightTool,
   onHeaderDelete,
   onInstallPwa,
-  onLocaleChange
+  onLocaleChange,
+  profiles,
+  activeProfileId,
+  onProfileChange,
+  onDeleteProfile,
+  onSetProfileEditMode
 }: WorkbookSidebarProps) {
+  const [isScriptDropdownOpen, setIsScriptDropdownOpen] = useState(false);
   return (
     <>
       {isToolsPanelOpen ? <button type="button" className="tools-drawer-backdrop" aria-label={t("toolbar.closeTools")} onClick={onCloseToolsPanel} /> : null}
 
       <header className={`top-toolbar ${isToolsPanelOpen ? "top-toolbar-open" : ""}`}>
         <div className="top-toolbar-inner">
+
+
+          <div className="toolbar-row toolbar-row-secondary sidebar-block sidebar-block-compact" aria-label={t("toolbar.tools")}>
+            <p className="sidebar-block-label">{t("toolbar.tools")}</p>
+            <div className="editor-local-toolbar-group toolbar-advanced-group">
+              <button
+                type="button"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "select" ? "toolbar-shortcut-active" : ""}`}
+                title={t("toolbar.selection")}
+                aria-label={t("toolbar.selection")}
+                aria-pressed={advancedTool === "select"}
+                onClick={() => onToggleAdvancedToolMode("select")}
+              >
+                <span className="selection-icon" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "draw" ? "toolbar-shortcut-active" : ""}`}
+                title={t("toolbar.freehand")}
+                aria-label={t("toolbar.freehand")}
+                aria-pressed={advancedTool === "draw"}
+                onClick={() => onToggleAdvancedToolMode("draw")}
+              >
+                ✎
+              </button>
+              <div className="toolbar-highlight-shell">
+                <button
+                  type="button"
+                  className={`chip-button toolbar-highlight-button ${openMenu === "highlight" || advancedTool === "highlight" ? "toolbar-highlight-button-active" : ""}`}
+                  aria-label={t("toolbar.highlighter")}
+                  title={t("toolbar.highlighter")}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={onToggleHighlightTool}
+                >
+                  <span className="toolbar-highlight-marker" aria-hidden="true">
+                    <span className="toolbar-highlight-marker-tip" />
+                    <span className="toolbar-highlight-marker-body" />
+                    <span className="toolbar-highlight-marker-line" style={{backgroundColor: selectedHighlightColor ?? DEFAULT_HIGHLIGHT_TOOL_COLOR}} />
+                  </span>
+                  <span className="toolbar-highlight-caret" aria-hidden="true">▾</span>
+                </button>
+
+                {openMenu === "highlight" ? createPortal(
+                  <div className="toolbar-highlight-backdrop" onMouseDown={(event) => {
+                    const x = event.clientX;
+                    const y = event.clientY;
+                    onToggleMenu("highlight");
+                    requestAnimationFrame(() => {
+                      const el = document.elementFromPoint(x, y);
+                      if (el instanceof HTMLElement) { el.click(); }
+                    });
+                  }}>
+                    <div className="toolbar-highlight-panel toolbar-highlight-portal" role="menu" aria-label={t("toolbar.chooseHighlighter")} onMouseDown={(event) => event.stopPropagation()}>
+                      {highlightOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`toolbar-highlight-swatch ${(option.value || null) === activeHighlightColor && advancedTool === "highlight" ? "toolbar-highlight-swatch-active" : ""}`}
+                          aria-label={option.label}
+                          title={option.label}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => onActivateHighlightTool(option.value)}
+                        >
+                          <span className="toolbar-highlight-swatch-sample" style={option.value ? {backgroundColor: option.value} : undefined} />
+                          <span className="toolbar-highlight-swatch-label">{option.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>,
+                  document.body
+                ) : null}
+              </div>
+              {selectedCount > 0 ? (
+                <button type="button" className="toolbar-shortcut toolbar-shortcut-symbol" title={t("toolbar.delete")} onClick={onHeaderDelete}>
+                  ×
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className={`toolbar-row toolbar-row-secondary toolbar-row-format sidebar-block sidebar-block-compact${isElementMenuVisible ? " toolbar-row-disabled" : ""}`} aria-label={t("toolbar.formatting")} aria-disabled={isElementMenuVisible}>
+            <p className="sidebar-block-label">{t("toolbar.defaultStyle")}</p>
+
+            <div className="toolbar-color-row">
+              <span className="toolbar-color-icon" title={t("toolbar.textColor")} aria-label={t("toolbar.textColor")}>
+                <span className="toolbar-color-icon-letter" aria-hidden="true">A</span>
+                <span className="toolbar-color-icon-bar" style={{backgroundColor: activeColor}} aria-hidden="true" />
+              </span>
+              {colorOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`canvas-quick-action canvas-text-color-chip${activeColor === option.value ? " canvas-text-color-chip-active" : ""}`}
+                  aria-label={option.label}
+                  title={option.label}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onApplyActiveColor(option.value)}
+                >
+                  <span className="canvas-text-color-sample" style={{backgroundColor: option.value}} />
+                </button>
+              ))}
+            </div>
+
+            <div className="toolbar-color-row">
+              <span className="toolbar-color-icon" title={t("toolbar.backgroundColor")} aria-label={t("toolbar.backgroundColor")}>
+                <svg viewBox="0 0 16 14" width="16" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+                  <rect x="1" y="1" width="14" height="12" rx="2" />
+                  <rect x="3" y="3" width="10" height="8" rx="1" fill={activeHighlightColor ?? "none"} stroke={activeHighlightColor ? "none" : "currentColor"} strokeWidth="0.8" strokeDasharray="2 1.2" />
+                </svg>
+              </span>
+              <button
+                type="button"
+                className={`canvas-quick-action canvas-text-highlight-chip${activeHighlightColor === null ? " canvas-text-highlight-chip-active" : ""}`}
+                title={t("toolbar.noBackground")}
+                aria-label={t("toolbar.noBackground")}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onApplyActiveHighlightColor("")}
+              >∅</button>
+              {highlightOptions.filter((o) => o.value).map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`canvas-quick-action canvas-text-highlight-chip${activeHighlightColor === option.value ? " canvas-text-highlight-chip-active" : ""}`}
+                  aria-label={option.label}
+                  title={option.label}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onApplyActiveHighlightColor(option.value)}
+                >
+                  <span className="canvas-text-highlight-sample" style={{backgroundColor: option.value}} />
+                </button>
+              ))}
+            </div>
+
+            <div className="toolbar-color-row">
+              <button type="button" className={`chip-button chip-button-compact${activeFontWeight >= 700 ? " chip-button-active" : ""}`} aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasBold}>
+                B
+              </button>
+              <button type="button" className={`chip-button chip-button-compact${activeFontStyle === "italic" ? " chip-button-active" : ""}`} aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasItalic}>
+                I
+              </button>
+              <button type="button" className={`chip-button chip-button-compact${activeUnderline ? " chip-button-active" : ""}`} aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasUnderline}>
+                <span style={{textDecoration: "underline"}}>U</span>
+              </button>
+              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("down")}>
+                A-
+              </button>
+              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.increase")} title={t("toolbar.increase")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("up")}>
+                A+
+              </button>
+            </div>
+          </div>
+
           <div className="toolbar-row toolbar-row-secondary sidebar-block sidebar-block-compact">
             <p className="sidebar-block-label">{t("toolbar.geometry")}</p>
             <div className="toolbar-shortcut-group toolbar-shortcut-group-symbols" aria-label={t("toolbar.geometryGroup")}>
@@ -220,7 +402,7 @@ export function WorkbookSidebar({
                   {renderStructuredToolGlyph(rootStructuredTool.id)}
                 </button>
               ) : null}
-              {commonInlineShortcuts.map((shortcut) => (
+              {commonInlineShortcuts.filter((s) => !s.id.startsWith("script")).map((shortcut) => (
                 <button
                   key={shortcut.id}
                   type="button"
@@ -241,6 +423,35 @@ export function WorkbookSidebar({
                   {renderShortcutGlyph(shortcut)}
                 </button>
               ))}
+              <button
+                type="button"
+                className={`toolbar-shortcut toolbar-shortcut-symbol ${isScriptDropdownOpen || pendingInsertTool?.kind === "scriptLetter" ? "toolbar-shortcut-active" : ""}`}
+                title={t("toolbar.scriptLetters")}
+                aria-expanded={isScriptDropdownOpen}
+                onClick={() => setIsScriptDropdownOpen((open) => !open)}
+              >
+                <span className="math-shortcut-glyph">{"\u{1D4B6}\u2009\u2026\u2009\u{1D4CF}"}</span>
+              </button>
+              {isScriptDropdownOpen ? createPortal(
+                <div className="toolbar-script-backdrop" onClick={() => setIsScriptDropdownOpen(false)}>
+                  <div className="toolbar-script-dropdown" onClick={(event) => event.stopPropagation()}>
+                    {SCRIPT_LETTER_OPTIONS.map((option) => (
+                      <button
+                        key={option.letter}
+                        type="button"
+                        className={`toolbar-script-letter ${pendingInsertTool?.kind === "scriptLetter" && pendingInsertTool.content === option.script ? "toolbar-script-letter-active" : ""}`}
+                        onClick={() => {
+                          onSelectScriptLetter(option.script, option.script);
+                          setIsScriptDropdownOpen(false);
+                        }}
+                      >
+                        {option.script}
+                      </button>
+                    ))}
+                  </div>
+                </div>,
+                document.body
+              ) : null}
             </div>
           </div>
 
@@ -271,105 +482,7 @@ export function WorkbookSidebar({
             </div>
           </div>
 
-          <div className="toolbar-row toolbar-row-format sidebar-block sidebar-block-compact" aria-label={t("toolbar.formatting")}>
-            <p className="sidebar-block-label">{t("toolbar.formatting")}</p>
-            <div className="editor-local-toolbar-group">
-              {colorOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`color-chip ${activeColor === option.value ? "color-chip-active" : ""}`}
-                  style={{backgroundColor: option.value, color: option.value}}
-                  aria-label={option.label}
-                  title={option.label}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onApplyActiveColor(option.value)}
-                />
-              ))}
-            </div>
 
-            <div className="editor-local-toolbar-group">
-              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasBold}>
-                B
-              </button>
-              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasItalic}>
-                I
-              </button>
-              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onMouseDown={(event) => event.preventDefault()} onClick={onToggleCanvasUnderline}>
-                <span style={{textDecoration: "underline"}}>U</span>
-              </button>
-              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("down")}>
-                A-
-              </button>
-              <button type="button" className="chip-button chip-button-compact" aria-label={t("toolbar.increase")} title={t("toolbar.increase")} onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustCanvasSize("up")}>
-                A+
-              </button>
-              <div className="toolbar-highlight-shell">
-                <button
-                  type="button"
-                  className={`chip-button toolbar-highlight-button ${openMenu === "highlight" || advancedTool === "highlight" ? "toolbar-highlight-button-active" : ""}`}
-                  aria-label={t("toolbar.highlighter")}
-                  title={t("toolbar.highlighter")}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onToggleMenu("highlight")}
-                >
-                  <span className="toolbar-highlight-marker" aria-hidden="true">
-                    <span className="toolbar-highlight-marker-tip" />
-                    <span className="toolbar-highlight-marker-body" />
-                    <span className="toolbar-highlight-marker-line" style={{backgroundColor: selectedHighlightColor ?? DEFAULT_HIGHLIGHT_TOOL_COLOR}} />
-                  </span>
-                  <span className="toolbar-highlight-caret" aria-hidden="true">▾</span>
-                </button>
-
-                {openMenu === "highlight" ? (
-                  <div className="toolbar-highlight-panel" role="menu" aria-label={t("toolbar.chooseHighlighter")}>
-                    {highlightOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={`toolbar-highlight-swatch ${(option.value || null) === activeHighlightColor && advancedTool === "highlight" ? "toolbar-highlight-swatch-active" : ""}`}
-                        aria-label={option.label}
-                        title={option.label}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => onActivateHighlightTool(option.value)}
-                      >
-                        <span className="toolbar-highlight-swatch-sample" style={option.value ? {backgroundColor: option.value} : undefined} />
-                        <span className="toolbar-highlight-swatch-label">{option.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "draw" ? "toolbar-shortcut-active" : ""}`}
-                title={t("toolbar.freehand")}
-                aria-label={t("toolbar.freehand")}
-                aria-pressed={advancedTool === "draw"}
-                onClick={() => onToggleAdvancedToolMode("draw")}
-              >
-                ✎
-              </button>
-            </div>
-
-            <div className="editor-local-toolbar-group toolbar-advanced-group" aria-label={t("toolbar.advancedTools")}>
-              <button
-                type="button"
-                className={`toolbar-shortcut toolbar-shortcut-symbol ${advancedTool === "select" ? "sheet-tool-button-active" : ""}`}
-                title={t("toolbar.selection")}
-                aria-label={t("toolbar.selection")}
-                aria-pressed={advancedTool === "select"}
-                onClick={() => onToggleAdvancedToolMode("select")}
-              >
-                <span className="selection-icon" aria-hidden="true" />
-              </button>
-              {selectedCount > 0 ? (
-                <button type="button" className="toolbar-shortcut toolbar-shortcut-symbol" title={t("toolbar.delete")} onClick={onHeaderDelete}>
-                  ×
-                </button>
-              ) : null}
-            </div>
-          </div>
         </div>
 
         <footer className="sidebar-footer">
@@ -416,25 +529,75 @@ export function WorkbookSidebar({
               </div>
             ) : null}
 
-            {openMenu === "settings" ? (
-              <div className="sidebar-settings-panel" role="menu" aria-label={t("toolbar.settings")}>
-                <label className="sheet-style-picker sidebar-settings-field">
-                  <span>{t("toolbar.language")}</span>
-                  <select
-                    className="sheet-style-select"
-                    value={locale}
-                    onChange={(event) => onLocaleChange(event.target.value)}
-                    aria-label={t("toolbar.language")}
-                    data-testid="language-select"
-                  >
-                    {Object.entries(localeLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+            {openMenu === "settings" ? createPortal(
+              <div className="sidebar-settings-backdrop" onClick={() => onToggleMenu("settings")}>
+                <div className="sidebar-settings-panel sidebar-settings-portal" role="menu" aria-label={t("toolbar.settings")} onClick={(event) => event.stopPropagation()}>
+                  <div className="sidebar-settings-field">
+                    <div className="sidebar-profile-header">
+                      <span>{t("profile.selectProfile")}</span>
+                      <button type="button" className="sidebar-profile-action" title={t("profile.createProfile")} onClick={() => onSetProfileEditMode("create")}>+</button>
+                    </div>
+                    <ul className="sidebar-profile-list">
+                      <li
+                        className={`sidebar-profile-item ${activeProfileId === null ? "sidebar-profile-item-active" : ""}`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onProfileChange(null)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onProfileChange(null); }}
+                      >
+                        <span className="profile-switcher-badge" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4Z"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        </span>
+                        <span className="sidebar-profile-item-name">{t("profile.anonymous")}</span>
+                      </li>
+                      {profiles.map((p) => (
+                        <li
+                          key={p.id}
+                          className={`sidebar-profile-item ${p.id === activeProfileId ? "sidebar-profile-item-active" : ""}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onProfileChange(p.id)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onProfileChange(p.id); }}
+                        >
+                          <span className={`profile-switcher-badge ${p.id === activeProfileId ? "profile-switcher-badge-active" : ""}`} aria-hidden="true">
+                            {`${p.firstName.charAt(0)}${p.lastName.charAt(0)}`.toUpperCase()}
+                          </span>
+                          <span className="sidebar-profile-item-name">{p.firstName} {p.lastName}</span>
+                          <div className="sidebar-profile-item-actions" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" className="sidebar-profile-action" title={t("profile.editProfile")} onClick={() => { onProfileChange(p.id); onSetProfileEditMode("edit"); }}>✎</button>
+                            <button type="button" className="sidebar-profile-action" title={t("profile.deleteProfile")} onClick={() => { if (window.confirm(t("profile.deleteProfileConfirm"))) { onDeleteProfile(p.id); } }}>
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6M14 11v6" />
+                                <path d="M9 6V4h6v2" />
+                              </svg>
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <hr className="sidebar-settings-divider" />
+                  <label className="sidebar-settings-field-inline">
+                    <span>{t("toolbar.language")}</span>
+                    <select
+                      className="sheet-style-select"
+                      value={locale}
+                      onChange={(event) => onLocaleChange(event.target.value)}
+                      aria-label={t("toolbar.language")}
+                      data-testid="language-select"
+                    >
+                      {Object.entries(localeLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>,
+              document.body
             ) : null}
           </div>
           <p className="sidebar-credit">
@@ -471,6 +634,8 @@ type WorkbookActionBarProps = {
   isExporting: "pdf" | "png" | "print" | null;
   sheetStyle: SheetStyle;
   sheetStyleOptions: SheetStyleOption[];
+  profiles: UserProfile[];
+  activeProfileId: string | null;
   onOpenTools: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -479,6 +644,8 @@ type WorkbookActionBarProps = {
   onPrint: () => void;
   onSheetStyleChange: (sheetStyle: SheetStyle) => void;
   onResetDocument: () => void;
+  onProfileChange: (profileId: string | null) => void;
+  onSetProfileEditMode: (mode: "create" | "edit" | null) => void;
 };
 
 export function WorkbookActionBar({
@@ -496,8 +663,22 @@ export function WorkbookActionBar({
   onExportPng,
   onPrint,
   onSheetStyleChange,
-  onResetDocument
+  onResetDocument,
+  profiles,
+  activeProfileId,
+  onProfileChange,
+  onSetProfileEditMode
 }: WorkbookActionBarProps) {
+  const activeProfile = profiles.find((p) => p.id === activeProfileId);
+  const initials = activeProfile ? `${activeProfile.firstName.charAt(0)}${activeProfile.lastName.charAt(0)}`.toUpperCase() : null;
+
+  function handleSwitcherChange(value: string) {
+    if (value === "__create__") {
+      onSetProfileEditMode("create");
+    } else {
+      onProfileChange(value || null);
+    }
+  }
   return (
     <div className="sheet-action-bar">
       <div className="sheet-action-group">
@@ -548,6 +729,31 @@ export function WorkbookActionBar({
         <button type="button" className="toolbar-action ghost" onClick={onResetDocument}>
           {t("toolbar.newDocument")}
         </button>
+        <div className="profile-switcher" title={t("profile.switcherHint")}>
+          <select
+            className="profile-switcher-select"
+            value={activeProfileId ?? ""}
+            onChange={(event) => handleSwitcherChange(event.target.value)}
+            aria-label={t("profile.switcherHint")}
+          >
+            <option value="">{t("profile.noProfile")}</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.firstName} {p.lastName}
+              </option>
+            ))}
+            <option value="__create__">+ {t("profile.createProfile")}</option>
+          </select>
+          <span className={`profile-switcher-badge ${initials ? "profile-switcher-badge-active" : ""}`} aria-hidden="true">
+            {initials ?? (
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4Z" />
+                <path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            )}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -1095,9 +1301,15 @@ type TextFormatMenuProps = {
   t: WorkbookTranslator;
   menuRef: ((node: HTMLDivElement | null) => void) | RefObject<HTMLDivElement | null>;
   position: {x: number; y: number; placement: "above" | "below"} | null;
+  colorOptions: Array<{ id: string; label: string; value: string }>;
+  activeColor: string;
   highlightOptions: HighlightOption[];
   selectedHighlightColor: string | null;
+  selectedFontWeight: number;
+  selectedFontStyle: "normal" | "italic";
+  selectedUnderline: boolean;
   onClose: () => void;
+  onApplyColor: (color: string) => void;
   onBold: () => void;
   onItalic: () => void;
   onUnderline: () => void;
@@ -1109,9 +1321,15 @@ export function TextFormatMenu({
   t,
   menuRef,
   position,
+  colorOptions,
+  activeColor,
   highlightOptions,
   selectedHighlightColor,
+  selectedFontWeight,
+  selectedFontStyle,
+  selectedUnderline,
   onClose,
+  onApplyColor,
   onBold,
   onItalic,
   onUnderline,
@@ -1130,36 +1348,73 @@ export function TextFormatMenu({
       data-placement={position.placement}
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <button type="button" className="canvas-quick-close" aria-label={t("canvas.closeMenu")} title={t("canvas.closeMenu")} onClick={onClose}>
-        ×
-      </button>
-      <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onClick={onBold}>
-        B
-      </button>
-      <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onClick={onItalic}>
-        I
-      </button>
-      <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onClick={onUnderline}>
-        <span style={{textDecoration: "underline"}}>U</span>
-      </button>
-      <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onClick={() => onSizeChange("down")}>
-        A-
-      </button>
-      <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.increase")} title={t("toolbar.increase")} onClick={() => onSizeChange("up")}>
-        A+
-      </button>
-      {highlightOptions.filter((option) => option.value).map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          className={`canvas-quick-action canvas-text-highlight-chip ${(option.value || null) === selectedHighlightColor ? "canvas-text-highlight-chip-active" : ""}`}
-          aria-label={t("canvas.highlightColor", {color: option.label})}
-          title={t("canvas.highlightColor", {color: option.label})}
-          onClick={() => onHighlight((option.value || null) === selectedHighlightColor ? "" : option.value)}
-        >
-          <span className="canvas-text-highlight-sample" style={{backgroundColor: option.value}} />
+      <div className="canvas-format-row">
+        <span className="toolbar-color-icon" title={t("toolbar.textColor")} aria-label={t("toolbar.textColor")}>
+          <span className="toolbar-color-icon-letter" aria-hidden="true">A</span>
+          <span className="toolbar-color-icon-bar" style={{backgroundColor: activeColor}} aria-hidden="true" />
+        </span>
+        {colorOptions.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            className={`canvas-quick-action canvas-text-color-chip ${activeColor === option.value ? "canvas-text-color-chip-active" : ""}`}
+            aria-label={option.label}
+            title={option.label}
+            onClick={() => onApplyColor(option.value)}
+          >
+            <span className="canvas-text-color-sample" style={{backgroundColor: option.value}} />
+          </button>
+        ))}
+        <button type="button" className="canvas-quick-close" aria-label={t("canvas.closeMenu")} title={t("canvas.closeMenu")} onClick={onClose}>
+          ×
         </button>
-      ))}
+      </div>
+
+      <div className="canvas-format-row">
+        <span className="toolbar-color-icon" title={t("toolbar.backgroundColor")} aria-label={t("toolbar.backgroundColor")}>
+          <svg viewBox="0 0 16 14" width="16" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+            <rect x="1" y="1" width="14" height="12" rx="2" />
+            <rect x="3" y="3" width="10" height="8" rx="1" fill={selectedHighlightColor ?? "none"} stroke={selectedHighlightColor ? "none" : "currentColor"} strokeWidth="0.8" strokeDasharray="2 1.2" />
+          </svg>
+        </span>
+        <button
+          type="button"
+          className={`canvas-quick-action canvas-text-highlight-chip ${!selectedHighlightColor ? "canvas-text-highlight-chip-active" : ""}`}
+          title={t("toolbar.noBackground")}
+          aria-label={t("toolbar.noBackground")}
+          onClick={() => onHighlight("")}
+        >∅</button>
+        {highlightOptions.filter((option) => option.value).map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            className={`canvas-quick-action canvas-text-highlight-chip ${(option.value || null) === selectedHighlightColor ? "canvas-text-highlight-chip-active" : ""}`}
+            aria-label={t("canvas.highlightColor", {color: option.label})}
+            title={t("canvas.highlightColor", {color: option.label})}
+            onClick={() => onHighlight((option.value || null) === selectedHighlightColor ? "" : option.value)}
+          >
+            <span className="canvas-text-highlight-sample" style={{backgroundColor: option.value}} />
+          </button>
+        ))}
+      </div>
+
+      <div className="canvas-format-row">
+        <button type="button" className={`canvas-quick-action canvas-text-format-action${selectedFontWeight >= 700 ? " canvas-text-format-action-active" : ""}`} aria-label={t("toolbar.bold")} title={t("toolbar.bold")} onClick={onBold}>
+          B
+        </button>
+        <button type="button" className={`canvas-quick-action canvas-text-format-action${selectedFontStyle === "italic" ? " canvas-text-format-action-active" : ""}`} aria-label={t("toolbar.italic")} title={t("toolbar.italic")} onClick={onItalic}>
+          I
+        </button>
+        <button type="button" className={`canvas-quick-action canvas-text-format-action${selectedUnderline ? " canvas-text-format-action-active" : ""}`} aria-label={t("toolbar.underline")} title={t("toolbar.underline")} onClick={onUnderline}>
+          <span style={{textDecoration: "underline"}}>U</span>
+        </button>
+        <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.decrease")} title={t("toolbar.decrease")} onClick={() => onSizeChange("down")}>
+          A-
+        </button>
+        <button type="button" className="canvas-quick-action canvas-text-format-action" aria-label={t("toolbar.increase")} title={t("toolbar.increase")} onClick={() => onSizeChange("up")}>
+          A+
+        </button>
+      </div>
     </div>
   );
 }
@@ -1225,5 +1480,116 @@ export function SelectionRectOverlay({selectionRect}: SelectionRectOverlayProps)
         height: `${Math.abs(selectionRect.currentY - selectionRect.originY)}px`
       }}
     />
+  );
+}
+
+type ProfileModalProps = {
+  t: WorkbookTranslator;
+  mode: "create" | "edit" | null;
+  profile: UserProfile | null;
+  sheetStyleOptions: SheetStyleOption[];
+  onSave: (data: Omit<UserProfile, "id">) => void;
+  onClose: () => void;
+};
+
+export function ProfileModal({ t, mode, profile, sheetStyleOptions, onSave, onClose }: ProfileModalProps) {
+  const [firstName, setFirstName] = useState(profile?.firstName ?? "");
+  const [lastName, setLastName] = useState(profile?.lastName ?? "");
+  const [className, setClassName] = useState(profile?.className ?? "");
+  const [sheetStyle, setSheetStyle] = useState<SheetStyle>(profile?.preferredSheetStyle ?? "seyes");
+  const [studyMode, setStudyMode] = useState<StudyMode>(profile?.preferredMode ?? "middleSchool");
+  const [showName, setShowName] = useState(profile?.showName ?? true);
+  const [showClass, setShowClass] = useState(profile?.showClass ?? true);
+  const [showDate, setShowDate] = useState(profile?.showDate ?? true);
+  const [highlightOnHover, setHighlightOnHover] = useState(profile?.highlightOnHover ?? true);
+
+  if (!mode) {
+    return null;
+  }
+
+  function handleSubmit() {
+    if (!firstName.trim() || !lastName.trim()) {
+      return;
+    }
+
+    onSave({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      className: className.trim(),
+      preferredSheetStyle: sheetStyle,
+      preferredMode: studyMode,
+      showName,
+      showClass,
+      showDate,
+      highlightOnHover
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="block-modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" onClick={(event) => event.stopPropagation()}>
+        <div className="block-modal-head">
+          <div>
+            <h2 id="profile-modal-title">{mode === "create" ? t("profile.createProfile") : t("profile.editProfile")}</h2>
+          </div>
+          <div className="card-actions">
+            <button type="button" className="small-action" onClick={onClose}>
+              {t("profile.cancel")}
+            </button>
+            <button type="button" className="small-action primary-inline-action" disabled={!firstName.trim() || !lastName.trim()} onClick={handleSubmit}>
+              {t("profile.save")}
+            </button>
+          </div>
+        </div>
+        <div className="profile-modal-fields">
+          <label className="profile-modal-field">
+            <span>{t("profile.firstName")}</span>
+            <input type="text" className="profile-modal-input" value={firstName} onChange={(event) => setFirstName(event.target.value)} />
+          </label>
+          <label className="profile-modal-field">
+            <span>{t("profile.lastName")}</span>
+            <input type="text" className="profile-modal-input" value={lastName} onChange={(event) => setLastName(event.target.value)} />
+          </label>
+          <label className="profile-modal-field">
+            <span>{t("profile.className")}</span>
+            <input type="text" className="profile-modal-input" value={className} onChange={(event) => setClassName(event.target.value)} />
+          </label>
+          <label className="profile-modal-field">
+            <span>{t("profile.preferredSheetStyle")}</span>
+            <select className="sheet-style-select" value={sheetStyle} onChange={(event) => setSheetStyle(event.target.value as SheetStyle)}>
+              {sheetStyleOptions.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="profile-modal-field">
+            <span>{t("profile.preferredMode")}</span>
+            <select className="sheet-style-select" value={studyMode} onChange={(event) => setStudyMode(event.target.value as StudyMode)}>
+              <option value="middleSchool">{t("profile.middleSchool")}</option>
+              <option value="highSchool">{t("profile.highSchool")}</option>
+            </select>
+          </label>
+          <fieldset className="profile-modal-fieldset">
+            <legend>{t("profile.visibleFields")}</legend>
+            <label className="profile-modal-checkbox">
+              <input type="checkbox" checked={showName} onChange={(event) => setShowName(event.target.checked)} />
+              <span>{t("profile.showName")}</span>
+            </label>
+            <label className="profile-modal-checkbox">
+              <input type="checkbox" checked={showClass} onChange={(event) => setShowClass(event.target.checked)} />
+              <span>{t("profile.showClass")}</span>
+            </label>
+            <label className="profile-modal-checkbox">
+              <input type="checkbox" checked={showDate} onChange={(event) => setShowDate(event.target.checked)} />
+              <span>{t("profile.showDate")}</span>
+            </label>
+          </fieldset>
+          <label className="profile-modal-checkbox">
+            <input type="checkbox" checked={highlightOnHover} onChange={(event) => setHighlightOnHover(event.target.checked)} />
+            <span>{t("profile.highlightOnHover")}</span>
+          </label>
+        </div>
+      </section>
+    </div>
   );
 }

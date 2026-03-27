@@ -34,6 +34,7 @@ import {
 import {
   CanvasQuickInsertMenu,
   ConfirmResetModal,
+  ProfileModal,
   GeometrySettingsMenu,
   GraduatedLineModal,
   GuidedBlockModal,
@@ -105,10 +106,13 @@ import type {
   SymbolResizeState,
   ArithmeticLineField,
   ArithmeticCarryField,
-  DivisionCellRowOptions
+  DivisionCellRowOptions,
+  UserProfile,
+  ProfileStore
 } from "@/components/math-workbook/shared";
 import {
   STORAGE_KEY,
+  PROFILE_STORAGE_KEY,
   WRITER_STATE_SCHEMA_VERSION,
   FLOATING_TEXTBOX_Y_OFFSET,
   CANVAS_QUICK_MENU_OFFSET_X,
@@ -119,6 +123,8 @@ import {
   CANVAS_GRID_TOP_REM,
   MAX_SNAP_THRESHOLD_PX,
   CANVAS_LINE_BASELINE_OFFSET_PX,
+  SCRIPT_CHARS,
+  DOUBLE_TAP_DELAY,
   DEFAULT_ACTIVE_COLOR,
   DEFAULT_HIGHLIGHT_TOOL_COLOR,
   DEFAULT_SUM_SYMBOL_SIZE,
@@ -198,6 +204,8 @@ import {
   getGridDimensions,
   getRemPixels,
   parseStoredState,
+  parseStoredProfiles,
+  getDocumentLabelsForProfile,
   getDefaultWidth,
   getDivisionWorkLines,
   getDivisionQuotientDigits,
@@ -285,7 +293,7 @@ export function MathWorkbook() {
   const [selectedGraduatedLineSettings, setSelectedGraduatedLineSettings] = useState<{ startValue: string; sections: string } | null>(null);
   const [canvasQuickMenu, setCanvasQuickMenu] = useState<CanvasQuickMenu>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuides>({ x: null, y: null });
-  const [selectedTextBoxMenuPosition, setSelectedTextBoxMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
+  const [selectedElementMenuPosition, setSelectedElementMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
   const [selectedGeometryMenuPosition, setSelectedGeometryMenuPosition] = useState<{ x: number; y: number; placement: "above" | "below" } | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | "png" | "print" | null>(null);
@@ -294,6 +302,12 @@ export function MathWorkbook() {
   const [isCanvasInteracting, setIsCanvasInteracting] = useState(false);
   const [canInstallApp, setCanInstallApp] = useState(false);
   const [isInstalledApp, setIsInstalledApp] = useState(false);
+  const [profileStore, setProfileStore] = useState<ProfileStore>({ profiles: [], activeProfileId: null });
+  const [profileEditMode, setProfileEditMode] = useState<"create" | "edit" | null>(null);
+  const activeProfile = useMemo(
+    () => profileStore.profiles.find((p) => p.id === profileStore.activeProfileId) ?? null,
+    [profileStore]
+  );
   const editorRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const selectionRef = useRef<Range | null>(null);
@@ -342,14 +356,16 @@ export function MathWorkbook() {
   const geometryNodeRefs = useRef<Record<string, SVGGElement | null>>({});
   const pendingFocusTextBoxIdRef = useRef<string | null>(null);
   const blockInputRefs = useRef<Record<string, Record<string, HTMLInputElement | HTMLTextAreaElement | null>>>({});
-  const selectedTextBoxMenuRef = useRef<HTMLDivElement | null>(null);
+  const selectedElementMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedGeometryMenuRef = useRef<HTMLDivElement | null>(null);
   const pendingNumericSelectionRef = useRef<{ blockId: string; field: string; start: number; end: number } | null>(null);
+  const inlineLastKeyRef = useRef<{ key: string; time: number } | null>(null);
   const [activeResultCell, setActiveResultCell] = useState<{ blockId: string; cellIndex: number } | null>(null);
   const historyInitializedRef = useRef(false);
   const skipHistoryRef = useRef(false);
   const previousStateRef = useRef<WriterState>(cloneWriterState(createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels)));
   const stateRef = useRef<WriterState>(cloneWriterState(createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels)));
+  const profileStoreRef = useRef<ProfileStore>(profileStore);
   const transientHistorySnapshotRef = useRef<WriterState | null>(null);
   const transientHistoryKindRef = useRef<"drag" | "edit" | null>(null);
   const suspendHistoryRef = useRef(false);
@@ -572,32 +588,52 @@ export function MathWorkbook() {
       placement
     };
   }, [isCanvasInteracting, selectedBlockIds, selectedCount, selectedGeometryIds, selectedStrokeIds, selectedSymbolIds, selectedTextBoxIds, selectionRect, state.blocks, state.geometry, state.strokes, state.symbols, state.textBoxes]);
+  const selectedFormatElement = useMemo(() => {
+    const block = selectedBlockId ? state.blocks.find((b) => b.id === selectedBlockId) : null;
+    if (block) return block;
+    const symbol = selectedSymbolId ? state.symbols.find((s) => s.id === selectedSymbolId) : null;
+    if (symbol) return symbol;
+    const textBox = selectedTextBoxId ? state.textBoxes.find((t) => t.id === selectedTextBoxId) : null;
+    if (textBox) return textBox;
+    const stroke = selectedStrokeId ? state.strokes.find((s) => s.id === selectedStrokeId) : null;
+    if (stroke) return { ...stroke, fontWeight: stroke.width >= 4 ? 700 : 500, fontStyle: "normal" as const, underline: false, highlightColor: null };
+    return null;
+  }, [selectedBlockId, selectedSymbolId, selectedTextBoxId, selectedStrokeId, state.blocks, state.symbols, state.textBoxes, state.strokes]);
+
   useEffect(() => {
-    if (!selectedTextBox || editingTextBoxId === selectedTextBox.id || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
-      setSelectedTextBoxMenuPosition(null);
+    const hasFormatElement = selectedBlock || selectedSymbol || selectedTextBox || selectedStroke;
+    if (!hasFormatElement || (selectedTextBox && editingTextBoxId === selectedTextBox.id) || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current) {
+      setSelectedElementMenuPosition(null);
       return;
     }
 
     const updateMenuPosition = () => {
       const canvasNode = canvasRef.current;
-      const textBoxNode = textBoxNodeRefs.current[selectedTextBox.id];
+      const elementNode: HTMLElement | SVGGElement | null | undefined =
+        selectedBlockId ? blockNodeRefs.current[selectedBlockId]
+        : selectedSymbolId ? symbolNodeRefs.current[selectedSymbolId]
+        : selectedTextBoxId ? textBoxNodeRefs.current[selectedTextBoxId]
+        : selectedStrokeId ? strokeNodeRefs.current[selectedStrokeId]
+        : null;
 
-      if (!canvasNode || !textBoxNode) {
-        setSelectedTextBoxMenuPosition(null);
+      if (!canvasNode || !elementNode) {
+        setSelectedElementMenuPosition(null);
         return;
       }
 
-      const menuNode = selectedTextBoxMenuRef.current;
+      const canvasBounds = canvasNode.getBoundingClientRect();
+      const elementBounds = elementNode.getBoundingClientRect();
+      const menuNode = selectedElementMenuRef.current;
       const menuOffset = 12;
       const horizontalGutter = 18;
       const estimatedMenuWidth = menuNode?.offsetWidth ?? 236;
       const estimatedMenuHeight = menuNode?.offsetHeight ?? 52;
       const canvasWidth = canvasNode.clientWidth;
       const canvasHeight = canvasNode.clientHeight;
-      const boxLeft = textBoxNode.offsetLeft;
-      const boxTop = textBoxNode.offsetTop;
-      const boxWidth = textBoxNode.offsetWidth;
-      const boxHeight = textBoxNode.offsetHeight;
+      const boxLeft = elementBounds.left - canvasBounds.left;
+      const boxTop = elementBounds.top - canvasBounds.top;
+      const boxWidth = elementBounds.width;
+      const boxHeight = elementBounds.height;
       const boxBottom = boxTop + boxHeight;
       const preferredCenterX = boxLeft + boxWidth / 2;
       const minCenterX = horizontalGutter + estimatedMenuWidth / 2;
@@ -612,7 +648,7 @@ export function MathWorkbook() {
       const placement: "above" | "below" = fitsAbove || !fitsBelow ? "above" : "below";
       const y = placement === "above" ? Math.max(horizontalGutter, boxTop - menuOffset) : Math.min(Math.max(horizontalGutter, belowY), Math.max(horizontalGutter, canvasHeight - horizontalGutter));
 
-      setSelectedTextBoxMenuPosition((current) =>
+      setSelectedElementMenuPosition((current) =>
         current && current.x === x && current.y === y && current.placement === placement
           ? current
           : { x, y, placement }
@@ -630,7 +666,7 @@ export function MathWorkbook() {
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("resize", resizeHandler);
     };
-  }, [editingTextBoxId, isCanvasInteracting, selectedCount, selectedTextBox, selectionRect]);
+  }, [editingTextBoxId, isCanvasInteracting, selectedBlock, selectedBlockId, selectedCount, selectedStroke, selectedStrokeId, selectedSymbol, selectedSymbolId, selectedTextBox, selectedTextBoxId, selectionRect]);
   useEffect(() => {
     if (!selectedGeometry || selectedCount !== 1 || isCanvasInteracting || selectionRect || !canvasRef.current || activeGeometryTool) {
       setSelectedGeometryMenuPosition(null);
@@ -705,6 +741,10 @@ export function MathWorkbook() {
       return activeStructuredTools.find((tool) => tool.id === pendingInsertTool.toolId)?.label ?? workbookUi.blockTitles.default;
     }
 
+    if (pendingInsertTool.kind === "scriptLetter") {
+      return pendingInsertTool.label;
+    }
+
     return findShortcutById(pendingInsertTool.shortcutId)?.hint ?? findShortcutById(pendingInsertTool.shortcutId)?.label ?? workbookUi.blockTitles.default;
   }, [pendingInsertTool, activeInlineShortcuts, activeStructuredTools, t, workbookUi.blockTitles.default]);
 
@@ -747,6 +787,26 @@ export function MathWorkbook() {
   }, [isHydrated, state]);
 
   useEffect(() => {
+    const saved = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+
+    if (saved) {
+      const parsed = parseStoredProfiles(saved);
+
+      if (parsed) {
+        setProfileStore(parsed);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profileStore));
+  }, [isHydrated, profileStore]);
+
+  useEffect(() => {
     const handleInstallable = (event: Event) => {
       const customEvent = event as CustomEvent<{available?: boolean}>;
       setCanInstallApp(Boolean(customEvent.detail?.available));
@@ -784,6 +844,10 @@ export function MathWorkbook() {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    profileStoreRef.current = profileStore;
+  }, [profileStore]);
 
   useEffect(() => {
     graduatedLineDraftRef.current = graduatedLineDraft;
@@ -907,6 +971,13 @@ export function MathWorkbook() {
           setSnapGuides({ x: null, y: null });
           return;
         }
+
+        if (advancedToolRef.current) {
+          event.preventDefault();
+          setAdvancedTool(null);
+          setPendingInsertTool(null);
+          return;
+        }
       }
 
       if (
@@ -987,7 +1058,7 @@ export function MathWorkbook() {
       return;
     }
 
-    const node = textBoxNodeRefs.current[pendingFocusTextBoxIdRef.current]?.querySelector("input");
+    const node = textBoxNodeRefs.current[pendingFocusTextBoxIdRef.current]?.querySelector("textarea, input") as HTMLTextAreaElement | HTMLInputElement | null;
 
     if (!node) {
       return;
@@ -1455,9 +1526,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         numeratorStrike: false,
         denominatorStrike: false,
@@ -1479,9 +1550,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
@@ -1501,9 +1572,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
@@ -1523,9 +1594,9 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
@@ -1544,19 +1615,19 @@ export function MathWorkbook() {
         caption: "",
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null,
         ...position
       } satisfies MathBlock;
     }
 
     if (type === "power") {
-      return { id: createId("power"), type, base: "", exponent: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: 500, fontStyle: "normal", underline: false, highlightColor: null, ...position } satisfies MathBlock;
+      return { id: createId("power"), type, base: "", exponent: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: state.activeFontWeight, fontStyle: state.activeFontStyle, underline: state.activeUnderline, highlightColor: null, ...position } satisfies MathBlock;
     }
 
-    return { id: createId("root"), type, radicand: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: 500, fontStyle: "normal", underline: false, highlightColor: null, ...position } satisfies MathBlock;
+    return { id: createId("root"), type, radicand: "", result: "", caption: "", color: state.activeColor, fontSize: defaultFontSize, fontWeight: state.activeFontWeight, fontStyle: state.activeFontStyle, underline: state.activeUnderline, highlightColor: null, ...position } satisfies MathBlock;
   }
 
   function createFloatingSymbol(shortcut: InlineShortcutItem, x: number, y: number) {
@@ -1574,9 +1645,9 @@ export function MathWorkbook() {
         y,
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null
       } satisfies FloatingSymbol;
     }
@@ -1593,9 +1664,9 @@ export function MathWorkbook() {
         y,
         color: state.activeColor,
         fontSize: defaultFontSize,
-        fontWeight: 500,
-        fontStyle: "normal",
-        underline: false,
+        fontWeight: state.activeFontWeight,
+        fontStyle: state.activeFontStyle,
+        underline: state.activeUnderline,
         highlightColor: null
       } satisfies FloatingSymbol;
     }
@@ -1610,9 +1681,9 @@ export function MathWorkbook() {
       y,
       color: state.activeColor,
       fontSize: defaultFontSize,
-      fontWeight: 500,
-      fontStyle: "normal",
-      underline: false,
+      fontWeight: state.activeFontWeight,
+      fontStyle: state.activeFontStyle,
+      underline: state.activeUnderline,
       highlightColor: null
     } satisfies FloatingSymbol;
   }
@@ -1652,9 +1723,9 @@ export function MathWorkbook() {
       text: "",
       color: state.activeColor,
       fontSize: variant === "note" ? defaultNoteFontSize : defaultFontSize,
-      fontWeight: 500,
-      fontStyle: "normal",
-      underline: false,
+      fontWeight: state.activeFontWeight,
+      fontStyle: state.activeFontStyle,
+      underline: state.activeUnderline,
       highlightColor: null,
       x,
       y: Math.max(18, y - yOffset),
@@ -1668,7 +1739,7 @@ export function MathWorkbook() {
     return {
       ...createFloatingTextBox(x, y, "default", "angle"),
       text: initialText,
-      width: Math.max(100, getTextBoxWidth(initialText))
+      width: getTextBoxWidth(initialText, getDefaultCanvasFontSize(state.sheetStyle))
     } satisfies FloatingTextBox;
   }
 
@@ -2881,6 +2952,8 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         nextValue = null;
       } else if (current.kind === "shortcut" && nextTool.kind === "shortcut" && current.shortcutId === nextTool.shortcutId) {
         nextValue = null;
+      } else if (current.kind === "scriptLetter" && nextTool.kind === "scriptLetter" && current.content === nextTool.content) {
+        nextValue = null;
       } else {
         nextValue = nextTool;
       }
@@ -2923,6 +2996,12 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
       return true;
     }
 
+    if (pendingInsertTool.kind === "scriptLetter") {
+      createScriptLetterAt(pendingInsertTool.label, pendingInsertTool.content, x, y);
+      setPendingInsertTool(null);
+      return true;
+    }
+
     createShortcutSymbolAt(pendingInsertTool.shortcutId, x, y, "exact");
     setPendingInsertTool(null);
     return true;
@@ -2944,7 +3023,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         mode === "exact" ? getExactTextBoxVerticalOffset("default") : FLOATING_TEXTBOX_Y_OFFSET
       ),
       text: initialText,
-      width: Math.max(100, getTextBoxWidth(initialText))
+      width: getTextBoxWidth(initialText, getDefaultCanvasFontSize(state.sheetStyle))
     };
     beginTransientHistorySession("edit");
 
@@ -3119,6 +3198,33 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     setCanvasQuickMenu(null);
   }
 
+  function createScriptLetterAt(label: string, content: string, x: number, y: number) {
+    const canvas = canvasRef.current;
+    const bounds = canvas?.getBoundingClientRect();
+    const placement = getExactCanvasPlacementPosition(x, y, (bounds?.width ?? 320) - 24, (bounds?.height ?? 320) - 24);
+    const defaultFontSize = getDefaultCanvasFontSize(state.sheetStyle);
+    const symbol = {
+      id: createId("symbol"),
+      type: "symbol",
+      label,
+      content,
+      kind: "text",
+      x: placement.x,
+      y: placement.y,
+      color: state.activeColor,
+      fontSize: defaultFontSize,
+      fontWeight: state.activeFontWeight,
+      fontStyle: state.activeFontStyle,
+      underline: state.activeUnderline,
+      highlightColor: null
+    } satisfies FloatingSymbol;
+    setState((current) => ({
+      ...current,
+      symbols: [...current.symbols, symbol]
+    }));
+    setSelectedSymbolIds([symbol.id]);
+  }
+
   function createShortcutSymbolAt(shortcutId: string, x: number, y: number, mode: "exact" | "soft" = "soft") {
     const shortcut = findShortcutById(shortcutId);
 
@@ -3269,7 +3375,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
   }
 
   function insertIntoEditingTextBox(textBoxId: string, content: string) {
-    const input = textBoxNodeRefs.current[textBoxId]?.querySelector("input");
+    const input = textBoxNodeRefs.current[textBoxId]?.querySelector("textarea, input") as HTMLTextAreaElement | HTMLInputElement | null;
     const currentTextBox = textBoxesRef.current.find((item) => item.id === textBoxId);
 
     if (!input || !currentTextBox) {
@@ -3280,15 +3386,15 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     const end = input.selectionEnd ?? start;
     const nextText = `${currentTextBox.text.slice(0, start)}${content}${currentTextBox.text.slice(end)}`;
     const nextCursor = start + content.length;
-    const minimumWidth = currentTextBox.variant === "note" ? 56 : 100;
+    const minimumWidth = currentTextBox.variant === "note" ? 56 : 36;
 
     updateTextBox(textBoxId, {
       text: nextText,
-      width: Math.max(minimumWidth, getTextBoxWidth(nextText))
+      width: Math.max(minimumWidth, getTextBoxWidth(nextText, currentTextBox.fontSize))
     });
 
     window.requestAnimationFrame(() => {
-      const nextInput = textBoxNodeRefs.current[textBoxId]?.querySelector("input");
+      const nextInput = textBoxNodeRefs.current[textBoxId]?.querySelector("textarea, input") as HTMLTextAreaElement | HTMLInputElement | null;
 
       if (!nextInput) {
         return;
@@ -3425,9 +3531,21 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     }
   }
 
+  function togglePendingBold() {
+    setState((current) => ({ ...current, activeFontWeight: current.activeFontWeight >= 700 ? 500 : 700 }));
+  }
+
+  function togglePendingItalic() {
+    setState((current) => ({ ...current, activeFontStyle: current.activeFontStyle === "italic" ? "normal" : "italic" }));
+  }
+
+  function togglePendingUnderline() {
+    setState((current) => ({ ...current, activeUnderline: !current.activeUnderline }));
+  }
+
   function toggleCanvasBold() {
     if (selectedCount === 0) {
-      runCommand("bold");
+      if (editingTextBoxId) { runCommand("bold"); }
       return;
     }
 
@@ -3459,7 +3577,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
   function toggleCanvasItalic() {
     if (selectedCount === 0) {
-      runCommand("italic");
+      if (editingTextBoxId) { runCommand("italic"); }
       return;
     }
 
@@ -3488,7 +3606,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
   function toggleCanvasUnderline() {
     if (selectedCount === 0) {
-      runCommand("underline");
+      if (editingTextBoxId) { runCommand("underline"); }
       return;
     }
 
@@ -3589,7 +3707,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
               return {
                 ...textBox,
                 fontSize: nextFontSize,
-                width: Math.max(minimumWidth, Math.round(getTextBoxWidth(textBox.text || " ") * sizeRatio))
+                width: Math.max(minimumWidth, getTextBoxWidth(textBox.text || " ", nextFontSize))
               };
             })()
           : textBox
@@ -3804,6 +3922,26 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
   }
 
   function handleInlineBlockKeyDown(blockId: string, field: string, event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (!event.repeat && event.key in SCRIPT_CHARS) {
+      const now = Date.now();
+      const last = inlineLastKeyRef.current;
+      if (last && last.key === event.key && now - last.time < DOUBLE_TAP_DELAY) {
+        event.preventDefault();
+        const el = event.currentTarget;
+        const pos = el.selectionStart ?? el.value.length;
+        const scriptChar = SCRIPT_CHARS[event.key];
+        const nextValue = el.value.slice(0, Math.max(0, pos - 1)) + scriptChar + el.value.slice(pos);
+        updateInlineBlockField(blockId, field, nextValue);
+        const newPos = Math.max(0, pos - 1) + scriptChar.length;
+        requestAnimationFrame(() => { el.setSelectionRange(newPos, newPos); });
+        inlineLastKeyRef.current = null;
+        return;
+      }
+      inlineLastKeyRef.current = { key: event.key, time: now };
+    } else if (!(event.key in SCRIPT_CHARS)) {
+      inlineLastKeyRef.current = null;
+    }
+
     const block = blocksRef.current.find((item) => item.id === blockId);
 
     if (!block) {
@@ -3883,7 +4021,15 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     finishBlockEditing(blockId);
   }
 
+  function isHeaderTextBox(textBoxId: string) {
+    return state.textBoxes.some((textBox) => textBox.id === textBoxId && textBox.headerField);
+  }
+
   function removeTextBox(textBoxId: string) {
+    if (isHeaderTextBox(textBoxId)) {
+      return;
+    }
+
     setState((current) => ({
       ...current,
       textBoxes: current.textBoxes.filter((textBox) => textBox.id !== textBoxId)
@@ -3908,7 +4054,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
       ...current,
       blocks: current.blocks.filter((block) => !selectedBlockIds.includes(block.id)),
       symbols: current.symbols.filter((symbol) => !selectedSymbolIds.includes(symbol.id)),
-      textBoxes: current.textBoxes.filter((textBox) => !selectedTextBoxIds.includes(textBox.id)),
+      textBoxes: current.textBoxes.filter((textBox) => textBox.headerField || !selectedTextBoxIds.includes(textBox.id)),
       strokes: current.strokes.filter((stroke) => !selectedStrokeIds.includes(stroke.id)),
       geometry: current.geometry.filter((shape) => !selectedGeometryIds.includes(shape.id))
     }));
@@ -3960,6 +4106,10 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     }
 
     previousStateRef.current = currentSnapshot;
+
+    if (kind === "drag") {
+      saveHeaderPositionsToProfile(currentSnapshot);
+    }
   }
 
   function scheduleTransientHistoryCommit(kind: "drag" | "edit") {
@@ -4681,8 +4831,24 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
   }
 
   function confirmResetDocument() {
+    const labels = getDocumentLabelsForProfile(activeProfile, workbookUi.defaultDocumentLabels, locale);
+    const sheetStyle = activeProfile?.preferredSheetStyle ?? defaultSheetStyle;
     window.localStorage.removeItem(STORAGE_KEY);
-    setState(createDefaultState(defaultSheetStyle, workbookUi.defaultDocumentLabels));
+    const newState = createDefaultState(sheetStyle, labels);
+
+    if (activeProfile) {
+      newState.mode = activeProfile.preferredMode;
+
+      if (newState.textBoxes.length >= 3) {
+        if (!activeProfile.showName) newState.textBoxes[0] = { ...newState.textBoxes[0], hidden: true };
+        if (!activeProfile.showClass) newState.textBoxes[1] = { ...newState.textBoxes[1], hidden: true };
+        if (!activeProfile.showDate) newState.textBoxes[2] = { ...newState.textBoxes[2], hidden: true };
+      }
+
+      newState.textBoxes = applyHeaderPositions(newState.textBoxes, activeProfile);
+    }
+
+    setState(newState);
     setOpenMenu(null);
     setCanvasQuickMenu(null);
     setModalState(null);
@@ -4693,6 +4859,117 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
     if (editorRef.current) {
       editorRef.current.innerHTML = DEFAULT_TEXT_HTML;
     }
+  }
+
+  function applyHeaderPositions(textBoxes: FloatingTextBox[], profile: UserProfile): FloatingTextBox[] {
+    if (!profile.headerPositions) {
+      return textBoxes;
+    }
+
+    return textBoxes.map((tb) => {
+      if (tb.headerField && profile.headerPositions?.[tb.headerField]) {
+        const pos = profile.headerPositions[tb.headerField];
+        return { ...tb, x: pos.x, y: pos.y };
+      }
+
+      return tb;
+    });
+  }
+
+  function applyProfileToDocument(profile: UserProfile) {
+    const labels = getDocumentLabelsForProfile(profile, workbookUi.defaultDocumentLabels, locale);
+
+    setState((current) => {
+      const textBoxes = [...current.textBoxes];
+
+      if (textBoxes.length >= 3) {
+        textBoxes[0] = { ...textBoxes[0], text: labels.fullName, width: getTextBoxWidth(labels.fullName, textBoxes[0].fontSize), hidden: !profile.showName };
+        textBoxes[1] = { ...textBoxes[1], text: labels.className, width: getTextBoxWidth(labels.className, textBoxes[1].fontSize), hidden: !profile.showClass };
+        textBoxes[2] = { ...textBoxes[2], text: labels.date, width: getTextBoxWidth(labels.date, textBoxes[2].fontSize), hidden: !profile.showDate };
+      }
+
+      return {
+        ...current,
+        textBoxes: applyHeaderPositions(textBoxes, profile),
+        sheetStyle: profile.preferredSheetStyle,
+        mode: profile.preferredMode
+      };
+    });
+  }
+
+  function handleProfileChange(profileId: string | null) {
+    setProfileStore((current) => ({ ...current, activeProfileId: profileId }));
+    const profile = profileStore.profiles.find((p) => p.id === profileId);
+
+    if (profile) {
+      applyProfileToDocument(profile);
+    }
+
+    setProfileEditMode(null);
+  }
+
+  function handleCreateProfile(profile: Omit<UserProfile, "id">) {
+    const newProfile: UserProfile = { ...profile, id: createId("profile") };
+    setProfileStore((current) => ({
+      profiles: [...current.profiles, newProfile],
+      activeProfileId: newProfile.id
+    }));
+    applyProfileToDocument(newProfile);
+    setProfileEditMode(null);
+  }
+
+  function handleUpdateProfile(updated: UserProfile) {
+    setProfileStore((current) => ({
+      ...current,
+      profiles: current.profiles.map((p) => (p.id === updated.id ? updated : p))
+    }));
+
+    if (profileStore.activeProfileId === updated.id) {
+      setState((current) => ({
+        ...current,
+        sheetStyle: updated.preferredSheetStyle,
+        mode: updated.preferredMode
+      }));
+    }
+
+    setProfileEditMode(null);
+  }
+
+  function handleDeleteProfile(profileId: string) {
+    setProfileStore((current) => ({
+      profiles: current.profiles.filter((p) => p.id !== profileId),
+      activeProfileId: current.activeProfileId === profileId ? null : current.activeProfileId
+    }));
+    setProfileEditMode(null);
+  }
+
+  function saveHeaderPositionsToProfile(writerState: WriterState) {
+    const currentProfileId = profileStoreRef.current?.activeProfileId;
+
+    if (!currentProfileId) {
+      return;
+    }
+
+    const headerTextBoxes = writerState.textBoxes.filter((tb) => tb.headerField);
+
+    if (headerTextBoxes.length === 0) {
+      return;
+    }
+
+    const positions: Record<string, { x: number; y: number }> = {};
+
+    for (const tb of headerTextBoxes) {
+      if (tb.headerField) {
+        positions[tb.headerField] = { x: tb.x, y: tb.y };
+      }
+    }
+
+    setProfileStore((current) => ({
+      ...current,
+      profiles: current.profiles.map((p) =>
+        p.id === currentProfileId ? { ...p, headerPositions: positions as UserProfile["headerPositions"] } : p
+      )
+    }));
   }
 
   function handleLocaleChange(nextLocale: string) {
@@ -4780,6 +5057,15 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
   function toggleMenu(menu: Exclude<UtilityMenu, null>) {
     setOpenMenu((current) => (current === menu ? null : menu));
+  }
+
+  function toggleHighlightTool() {
+    if (advancedTool !== "highlight") {
+      activateHighlightTool(state.activeHighlightColor || DEFAULT_HIGHLIGHT_TOOL_COLOR);
+      setOpenMenu("highlight");
+    } else {
+      toggleMenu("highlight");
+    }
   }
 
   function toggleAdvancedToolMode(tool: AdvancedTool) {
@@ -4923,14 +5209,21 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         onToolDragEnd={handleToolDragEnd}
         onTogglePendingStructuredTool={(toolId) => togglePendingInsertTool({kind: "structured", toolId})}
         onTogglePendingShortcut={(shortcutId) => togglePendingInsertTool({kind: "shortcut", shortcutId})}
+        onSelectScriptLetter={(label, content) => togglePendingInsertTool({kind: "scriptLetter", label, content})}
         onToggleAdvancedToolMode={toggleAdvancedToolMode}
         shouldIgnoreToolbarClick={shouldIgnoreToolbarClick}
         onApplyActiveColor={applyActiveColor}
-        onToggleCanvasBold={toggleCanvasBold}
-        onToggleCanvasItalic={toggleCanvasItalic}
-        onToggleCanvasUnderline={toggleCanvasUnderline}
+        onApplyActiveHighlightColor={applyCanvasHighlight}
+        onToggleCanvasBold={togglePendingBold}
+        onToggleCanvasItalic={togglePendingItalic}
+        onToggleCanvasUnderline={togglePendingUnderline}
+        activeFontWeight={state.activeFontWeight}
+        activeFontStyle={state.activeFontStyle}
+        activeUnderline={state.activeUnderline}
+        isElementMenuVisible={selectedElementMenuPosition !== null}
         onAdjustCanvasSize={adjustCanvasSize}
         onToggleMenu={toggleMenu}
+        onToggleHighlightTool={toggleHighlightTool}
         onActivateHighlightTool={activateHighlightTool}
         onHeaderDelete={handleHeaderDelete}
         onInstallPwa={() => {
@@ -4940,6 +5233,11 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
           handleLocaleChange(nextLocale);
           setOpenMenu(null);
         }}
+        profiles={profileStore.profiles}
+        activeProfileId={profileStore.activeProfileId}
+        onProfileChange={handleProfileChange}
+        onDeleteProfile={handleDeleteProfile}
+        onSetProfileEditMode={(mode) => { setProfileEditMode(mode); if (mode) setOpenMenu(null); }}
       />
 
       <section className="editor-stage">
@@ -4959,13 +5257,17 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
           onPrint={printSheet}
           onSheetStyleChange={(sheetStyle) => setState((current) => ({...current, sheetStyle}))}
           onResetDocument={resetDocument}
+          profiles={profileStore.profiles}
+          activeProfileId={profileStore.activeProfileId}
+          onProfileChange={handleProfileChange}
+          onSetProfileEditMode={(mode) => { setProfileEditMode(mode); if (mode) setOpenMenu(null); }}
         />
 
         <div className="editor-sheet">
           <div className="document-canvas-viewport">
             <div className="document-canvas-stage">
               <div
-                className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || advancedTool === "graduated-line" || activeGeometryTool ? "document-canvas-draw-mode" : ""} ${advancedTool === "highlight" ? "document-canvas-highlight-mode" : ""} ${activeGeometryTool === "protractor" ? "document-canvas-protractor-mode" : ""} ${pendingInsertTool ? "document-canvas-insert-mode" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || advancedTool === "graduated-line" || advancedTool === "select" || advancedTool === "move" || pendingInsertTool || activeGeometryTool ? "document-canvas-touch-locked" : ""}`}
+                className={`document-canvas document-canvas-${state.sheetStyle} ${isCanvasDropActive ? "document-canvas-drop-active" : ""} ${isCanvasInteracting ? "document-canvas-interacting" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || advancedTool === "graduated-line" || activeGeometryTool ? "document-canvas-draw-mode" : ""} ${advancedTool === "highlight" ? "document-canvas-highlight-mode" : ""} ${activeGeometryTool === "protractor" ? "document-canvas-protractor-mode" : ""} ${pendingInsertTool ? "document-canvas-insert-mode" : ""} ${advancedTool === "draw" || advancedTool === "highlight" || advancedTool === "graduated-line" || advancedTool === "select" || advancedTool === "move" || pendingInsertTool || activeGeometryTool ? "document-canvas-touch-locked" : ""} ${(activeProfile?.highlightOnHover ?? true) ? "document-canvas-hover-highlight" : ""}`}
                 style={{ "--canvas-type-size": `${getDefaultCanvasFontSize(state.sheetStyle)}rem` } as ReactCSSProperties}
                 ref={canvasRef}
                 data-testid="document-canvas"
@@ -5083,17 +5385,19 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
               onPaste={handlePaste}
             />
 
-            {pendingInsertTool?.kind === "shortcut" && insertCursorPreview.visible ? (
+            {(pendingInsertTool?.kind === "shortcut" || pendingInsertTool?.kind === "scriptLetter") && insertCursorPreview.visible ? (
               <div
                 className="canvas-insert-anchor"
                 style={{ left: `${insertCursorPreview.x}px`, top: `${insertCursorPreview.y}px`, color: state.activeColor }}
                 aria-hidden="true"
               >
-                {renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
+                {pendingInsertTool.kind === "scriptLetter"
+                  ? renderShortcutGlyph({ id: "scriptLetter", label: pendingInsertTool.label })
+                  : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
               </div>
             ) : null}
 
-            {((pendingInsertTool && pendingInsertTool.kind !== "shortcut") || advancedTool === "highlight") && insertCursorPreview.visible ? (
+            {((pendingInsertTool && pendingInsertTool.kind !== "shortcut" && pendingInsertTool.kind !== "scriptLetter") || advancedTool === "highlight") && insertCursorPreview.visible ? (
               <div
                 className={`canvas-insert-cursor ${advancedTool === "highlight" ? "canvas-insert-cursor-highlighter" : ""} ${pendingInsertTool?.kind === "shortcut" ? "canvas-insert-cursor-symbol" : ""}`}
                 style={{
@@ -5112,6 +5416,8 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
                   renderStructuredToolGlyph(pendingInsertTool.toolId)
                 ) : pendingInsertTool?.kind === "shortcut" ? (
                   renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })
+                ) : pendingInsertTool?.kind === "scriptLetter" ? (
+                  renderShortcutGlyph({ id: "scriptLetter", label: pendingInsertTool.label })
                 ) : null}
               </div>
             ) : null}
@@ -5119,7 +5425,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
             {pendingInsertTool ? (
               <div key={`${pendingInsertTool.kind}-${pendingInsertLabel}`} className="canvas-insert-hint" aria-live="polite">
                 <span className="canvas-insert-hint-glyph" aria-hidden="true">
-                  {pendingInsertTool.kind === "text" ? "T" : pendingInsertTool.kind === "structured" ? renderStructuredToolGlyph(pendingInsertTool.toolId) : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
+                  {pendingInsertTool.kind === "text" ? "T" : pendingInsertTool.kind === "structured" ? renderStructuredToolGlyph(pendingInsertTool.toolId) : pendingInsertTool.kind === "scriptLetter" ? renderShortcutGlyph({ id: "scriptLetter", label: pendingInsertTool.label }) : renderShortcutGlyph(findShortcutById(pendingInsertTool.shortcutId) ?? { id: pendingInsertTool.shortcutId, label: "?" })}
                 </span>
                 <span>{t("canvas.insertHint", {item: pendingInsertLabel})}</span>
               </div>
@@ -5237,7 +5543,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
               />
             ))}
 
-            {state.textBoxes.map((textBox) => (
+            {state.textBoxes.filter((textBox) => !textBox.hidden).map((textBox) => (
               <FloatingTextBoxItem
                 key={textBox.id}
                 textBox={textBox}
@@ -5266,11 +5572,11 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
                   selectSingleTextBox(textBox.id);
                 }}
                 onTextChange={(nextText) => {
-                  const minimumWidth = textBox.variant === "note" ? 56 : 100;
+                  const minimumWidth = textBox.variant === "note" ? 56 : 36;
 
                   updateTextBox(textBox.id, {
                     text: nextText,
-                    width: Math.max(minimumWidth, getTextBoxWidth(nextText))
+                    width: Math.max(minimumWidth, getTextBoxWidth(nextText, textBox.fontSize))
                   });
                 }}
                 onSubmit={() => {
@@ -5286,7 +5592,7 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
                   updateTextBox(textBox.id, {
                     text: value.trim(),
-                    width: Math.max(textBox.variant === "note" ? 56 : 36, getTextBoxWidth(value))
+                    width: Math.max(textBox.variant === "note" ? 56 : 36, getTextBoxWidth(value, textBox.fontSize))
                   });
                   setEditingTextBoxId(null);
                   clearFloatingSelection();
@@ -5371,11 +5677,17 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
 
             <TextFormatMenu
               t={t}
-              menuRef={selectedTextBoxMenuRef}
-              position={selectedTextBoxMenuPosition}
+              menuRef={selectedElementMenuRef}
+              position={selectedElementMenuPosition}
+              colorOptions={workbookUi.colorOptions}
+              activeColor={state.activeColor}
               highlightOptions={workbookUi.highlightOptions}
               selectedHighlightColor={selectedHighlightColor}
+              selectedFontWeight={selectedFormatElement?.fontWeight ?? 500}
+              selectedFontStyle={selectedFormatElement?.fontStyle ?? "normal"}
+              selectedUnderline={selectedFormatElement?.underline ?? false}
               onClose={clearFloatingSelection}
+              onApplyColor={applyActiveColor}
               onBold={toggleCanvasBold}
               onItalic={toggleCanvasItalic}
               onUnderline={toggleCanvasUnderline}
@@ -5441,6 +5753,23 @@ function createGeometryShapeFromDraft(draft: GeometryDraft): Exclude<GeometrySha
         onClose={() => setConfirmResetState(null)}
         onConfirm={confirmResetDocument}
       />
+      {profileEditMode ? (
+        <ProfileModal
+          key={profileEditMode === "edit" ? activeProfile?.id : "__create__"}
+          t={t}
+          mode={profileEditMode}
+          profile={profileEditMode === "edit" ? activeProfile : null}
+          sheetStyleOptions={workbookUi.sheetStyleOptions}
+          onSave={(data) => {
+            if (profileEditMode === "edit" && activeProfile) {
+              handleUpdateProfile({ ...data, id: activeProfile.id });
+            } else {
+              handleCreateProfile(data);
+            }
+          }}
+          onClose={() => setProfileEditMode(null)}
+        />
+      ) : null}
     </main>
   );
 }

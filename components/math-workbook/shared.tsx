@@ -168,11 +168,15 @@ export type FloatingSymbol = {
   highlightColor: string | null;
 };
 
+export type HeaderField = "fullName" | "className" | "date";
+
 export type FloatingTextBox = {
   id: string;
   type: "textBox";
   variant?: "default" | "note";
   notation?: "plain" | "angle";
+  hidden?: boolean;
+  headerField?: HeaderField;
   text: string;
   color: string;
   fontSize: number;
@@ -262,6 +266,9 @@ export type WriterState = {
   sheetStyle: SheetStyle;
   activeColor: string;
   activeHighlightColor: string | null;
+  activeFontWeight: number;
+  activeFontStyle: "normal" | "italic";
+  activeUnderline: boolean;
   textHtml: string;
   blocks: MathBlock[];
   symbols: FloatingSymbol[];
@@ -348,6 +355,7 @@ export type PendingInsertTool =
   | { kind: "text" }
   | { kind: "structured"; toolId: StructuredTool }
   | { kind: "shortcut"; shortcutId: string }
+  | { kind: "scriptLetter"; label: string; content: string }
   | null;
 
 export type InsertCursorPreview = {
@@ -488,6 +496,7 @@ export type SymbolResizeState = {
 };
 
 export const STORAGE_KEY = "maths-facile-free-layout-v1";
+export const PROFILE_STORAGE_KEY = "dysmaths-profiles-v1";
 export const WRITER_STATE_SCHEMA_VERSION = 2;
 export const FLOATING_TEXTBOX_Y_OFFSET = 10;
 export const CANVAS_QUICK_MENU_OFFSET_X = 30;
@@ -552,6 +561,90 @@ export const DEFAULT_DOCUMENT_LABELS: DefaultDocumentLabels = {
   date: "Date:"
 };
 
+export type HeaderFieldPosition = {
+  x: number;
+  y: number;
+};
+
+export type UserProfile = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  className: string;
+  preferredSheetStyle: SheetStyle;
+  preferredMode: StudyMode;
+  showName: boolean;
+  showClass: boolean;
+  showDate: boolean;
+  highlightOnHover: boolean;
+  headerPositions?: Record<HeaderField, HeaderFieldPosition>;
+};
+
+export type ProfileStore = {
+  profiles: UserProfile[];
+  activeProfileId: string | null;
+};
+
+export function parseStoredProfiles(raw: string): ProfileStore | null {
+  try {
+    const parsed = JSON.parse(raw) as ProfileStore;
+
+    if (!Array.isArray(parsed.profiles)) {
+      return null;
+    }
+
+    const profiles = parsed.profiles
+      .filter(
+        (p) =>
+          typeof p.id === "string" &&
+          typeof p.firstName === "string" &&
+          typeof p.lastName === "string" &&
+          typeof p.className === "string" &&
+          typeof p.preferredSheetStyle === "string" &&
+          typeof p.preferredMode === "string"
+      )
+      .map((p): UserProfile => ({
+        ...p,
+        showName: typeof p.showName === "boolean" ? p.showName : true,
+        showClass: typeof p.showClass === "boolean" ? p.showClass : true,
+        showDate: typeof p.showDate === "boolean" ? p.showDate : true,
+        highlightOnHover: typeof p.highlightOnHover === "boolean" ? p.highlightOnHover : true
+      }));
+
+    return {
+      profiles,
+      activeProfileId: typeof parsed.activeProfileId === "string" ? parsed.activeProfileId : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function formatDateForLocale(date: Date, locale: AppLocale): string {
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(date);
+}
+
+export function getDocumentLabelsForProfile(
+  profile: UserProfile | null,
+  defaultLabels: DefaultDocumentLabels,
+  locale: AppLocale
+): DefaultDocumentLabels {
+  if (!profile) {
+    return defaultLabels;
+  }
+
+  return {
+    title: defaultLabels.title,
+    fullName: `${profile.firstName} ${profile.lastName}`,
+    className: profile.className,
+    date: formatDateForLocale(new Date(), locale)
+  };
+}
+
 export function getDefaultSheetStyleForLocale(locale: AppLocale): SheetStyle {
   switch (locale) {
     case "fr":
@@ -578,6 +671,7 @@ export function createDefaultHeaderTextBoxes(sheetStyle: SheetStyle, labels: Def
       id: createId("text"),
       type: "textBox",
       variant: "default",
+      headerField: "fullName" as const,
       text: labels.fullName,
       color: DEFAULT_ACTIVE_COLOR,
       fontSize,
@@ -587,12 +681,13 @@ export function createDefaultHeaderTextBoxes(sheetStyle: SheetStyle, labels: Def
       highlightColor: null,
       x: Math.round(startX),
       y: Math.round(firstBaseline - fieldHeight + 5),
-      width: getTextBoxWidth(labels.fullName)
+      width: getTextBoxWidth(labels.fullName, fontSize)
     },
     {
       id: createId("text"),
       type: "textBox",
       variant: "default",
+      headerField: "className" as const,
       text: labels.className,
       color: DEFAULT_ACTIVE_COLOR,
       fontSize,
@@ -602,12 +697,13 @@ export function createDefaultHeaderTextBoxes(sheetStyle: SheetStyle, labels: Def
       highlightColor: null,
       x: Math.round(startX),
       y: Math.round(secondBaseline - fieldHeight + 5),
-      width: getTextBoxWidth(labels.className)
+      width: getTextBoxWidth(labels.className, fontSize)
     },
     {
       id: createId("text"),
       type: "textBox",
       variant: "default",
+      headerField: "date" as const,
       text: labels.date,
       color: DEFAULT_ACTIVE_COLOR,
       fontSize,
@@ -617,7 +713,7 @@ export function createDefaultHeaderTextBoxes(sheetStyle: SheetStyle, labels: Def
       highlightColor: null,
       x: Math.round(dateX),
       y: Math.round(secondBaseline - fieldHeight + 5),
-      width: getTextBoxWidth(labels.date)
+      width: getTextBoxWidth(labels.date, fontSize)
     }
   ];
 }
@@ -630,6 +726,9 @@ export function createDefaultState(sheetStyle: SheetStyle = "seyes", labels: Def
     sheetStyle,
     activeColor: DEFAULT_ACTIVE_COLOR,
     activeHighlightColor: "rgba(255, 226, 92, 0.58)",
+    activeFontWeight: 500,
+    activeFontStyle: "normal",
+    activeUnderline: false,
     textHtml: DEFAULT_TEXT_HTML,
     blocks: [],
     symbols: [],
@@ -686,7 +785,7 @@ export const STRUCTURED_TOOL_DEFINITIONS = [
 ] as const;
 
 export const INLINE_SHORTCUT_DEFINITIONS: Array<{
-  nameKey: "essentials" | "geometry" | "highSchool";
+  nameKey: "essentials" | "geometry" | "highSchool" | "variables";
   items: Array<InlineShortcutItem & {hintKey: keyof ReturnType<typeof createWorkbookUi>["shortcutHints"]}>;
 }> = [
   {
@@ -722,7 +821,41 @@ export const INLINE_SHORTCUT_DEFINITIONS: Array<{
       { id: "sum", label: "Σ", hintKey: "sum", hint: "", content: "Σ(k=1→n)", modes: ["highSchool"] },
       { id: "integral", label: "∫", hintKey: "integral", hint: "", content: "∫[a;b]", modes: ["highSchool"] }
     ]
+  },
+  {
+    nameKey: "variables",
+    items: [
+      { id: "scriptX", label: "𝓍", hintKey: "scriptX", hint: "", content: "𝓍", modes: ["middleSchool", "highSchool"] },
+      { id: "scriptY", label: "𝓎", hintKey: "scriptY", hint: "", content: "𝓎", modes: ["middleSchool", "highSchool"] },
+      { id: "scriptZ", label: "𝓏", hintKey: "scriptZ", hint: "", content: "𝓏", modes: ["middleSchool", "highSchool"] }
+    ]
   }
+];
+
+export const SCRIPT_CHARS: Record<string, string> = {
+  a: "\u{1D4B6}", b: "\u{1D4B7}", c: "\u{1D4B8}", d: "\u{1D4B9}", e: "\u{212F}", f: "\u{1D4BB}",
+  g: "\u{210A}", h: "\u{1D4BD}", i: "\u{1D4BE}", j: "\u{1D4BF}", k: "\u{1D4C0}", l: "\u{1D4C1}",
+  m: "\u{1D4C2}", n: "\u{1D4C3}", o: "\u{2134}", p: "\u{1D4C5}", q: "\u{1D4C6}", r: "\u{1D4C7}",
+  s: "\u{1D4C8}", t: "\u{1D4C9}", u: "\u{1D4CA}", v: "\u{1D4CB}", w: "\u{1D4CC}", x: "\u{1D4CD}",
+  y: "\u{1D4CE}", z: "\u{1D4CF}",
+  A: "\u{1D49C}", B: "\u{212C}", C: "\u{1D49E}", D: "\u{1D49F}", E: "\u{2130}", F: "\u{2131}",
+  G: "\u{1D4A2}", H: "\u{210B}", I: "\u{2110}", J: "\u{1D4A5}", K: "\u{1D4A6}", L: "\u{2112}",
+  M: "\u{2133}", N: "\u{1D4A9}", O: "\u{1D4AA}", P: "\u{1D4AB}", Q: "\u{1D4AC}", R: "\u{211B}",
+  S: "\u{1D4AE}", T: "\u{1D4AF}", U: "\u{1D4B0}", V: "\u{1D4B1}", W: "\u{1D4B2}", X: "\u{1D4B3}",
+  Y: "\u{1D4B4}", Z: "\u{1D4B5}"
+};
+export const DOUBLE_TAP_DELAY = 400;
+
+export const SCRIPT_LETTER_OPTIONS: Array<{ letter: string; script: string }> = [
+  { letter: "a", script: "\u{1D4B6}" }, { letter: "b", script: "\u{1D4B7}" }, { letter: "c", script: "\u{1D4B8}" },
+  { letter: "d", script: "\u{1D4B9}" }, { letter: "e", script: "\u{212F}" }, { letter: "f", script: "\u{1D4BB}" },
+  { letter: "g", script: "\u{210A}" }, { letter: "h", script: "\u{1D4BD}" }, { letter: "i", script: "\u{1D4BE}" },
+  { letter: "j", script: "\u{1D4BF}" }, { letter: "k", script: "\u{1D4C0}" }, { letter: "l", script: "\u{1D4C1}" },
+  { letter: "m", script: "\u{1D4C2}" }, { letter: "n", script: "\u{1D4C3}" }, { letter: "o", script: "\u{2134}" },
+  { letter: "p", script: "\u{1D4C5}" }, { letter: "q", script: "\u{1D4C6}" }, { letter: "r", script: "\u{1D4C7}" },
+  { letter: "s", script: "\u{1D4C8}" }, { letter: "t", script: "\u{1D4C9}" }, { letter: "u", script: "\u{1D4CA}" },
+  { letter: "v", script: "\u{1D4CB}" }, { letter: "w", script: "\u{1D4CC}" }, { letter: "x", script: "\u{1D4CD}" },
+  { letter: "y", script: "\u{1D4CE}" }, { letter: "z", script: "\u{1D4CF}" }
 ];
 
 export function createId(prefix: string) {
@@ -790,7 +923,10 @@ export function createWorkbookUi(t: WorkbookTranslator) {
     perpendicular: t("shortcuts.perpendicular"),
     degree: t("shortcuts.degree"),
     sum: t("shortcuts.sum"),
-    integral: t("shortcuts.integral")
+    integral: t("shortcuts.integral"),
+    scriptX: t("shortcuts.scriptX"),
+    scriptY: t("shortcuts.scriptY"),
+    scriptZ: t("shortcuts.scriptZ")
   } as const;
   const inlineShortcutGroups: InlineShortcutGroup[] = INLINE_SHORTCUT_DEFINITIONS.map((group) => ({
     name: t(`shortcutGroups.${group.nameKey}`),
@@ -920,9 +1056,30 @@ export function renderIntegralSymbolSvg(size: number) {
   );
 }
 
-export function getTextBoxWidth(text: string) {
-  const visibleText = text.trim();
-  return Math.max(36, Math.min(920, visibleText.length * 14 + 12));
+let _textMeasureCtx: CanvasRenderingContext2D | null = null;
+function getTextMeasureCtx(): CanvasRenderingContext2D | null {
+  if (typeof document === "undefined") return null;
+  if (!_textMeasureCtx) _textMeasureCtx = document.createElement("canvas").getContext("2d");
+  return _textMeasureCtx;
+}
+
+export function getTextBoxWidth(text: string, fontSizeRem = DEFAULT_CANVAS_FONT_SIZE_REM) {
+  const lines = text.split("\n");
+  const ctx = getTextMeasureCtx();
+  let maxPx = 0;
+  if (ctx) {
+    const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    ctx.font = `500 ${fontSizeRem * rootPx}px "Segoe UI", "Candara", "Trebuchet MS", sans-serif`;
+    for (const line of lines) {
+      const w = ctx.measureText(line.trim()).width;
+      if (w > maxPx) maxPx = w;
+    }
+  } else {
+    const longest = lines.reduce((a, b) => (a.length > b.length ? a : b), "");
+    maxPx = longest.trim().length * fontSizeRem * 9;
+  }
+  const min = text.trim() ? 36 : 100;
+  return Math.max(min, Math.min(920, Math.ceil(maxPx) + 12));
 }
 
 export function getSheetMetrics(sheetStyle: SheetStyle, rem: number) {
@@ -1743,6 +1900,9 @@ export function parseStoredState(raw: string, fallbackSheetStyle: SheetStyle, la
         typeof (parsed as { activeHighlightColor?: unknown }).activeHighlightColor === "string"
           ? parsed.activeHighlightColor
           : defaultState.activeHighlightColor,
+      activeFontWeight: typeof (parsed as { activeFontWeight?: unknown }).activeFontWeight === "number" ? parsed.activeFontWeight : 500,
+      activeFontStyle: (parsed as { activeFontStyle?: unknown }).activeFontStyle === "italic" ? "italic" : "normal",
+      activeUnderline: typeof (parsed as { activeUnderline?: unknown }).activeUnderline === "boolean" ? parsed.activeUnderline : false,
       blocks: parsed.blocks.map((block) => ({
         ...block,
         ...(block.type === "division"
